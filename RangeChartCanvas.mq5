@@ -570,6 +570,9 @@ void Render(void)
 
    g_draw.RenderAll(g_view,g_sel,_Digits);
 
+   if(g_hover>=0 && g_hover!=g_sel)                // handles hint that it is grabbable
+      g_draw.RenderOne(g_view,g_hover,true,_Digits);
+
    if(g_placing)                                   // live preview of the new shape
      {
       const int gi=g_draw.Add(g_ghost);
@@ -579,6 +582,7 @@ void Render(void)
 
    //--- crosshair
    SRangeBar hb;
+   ZeroMemory(hb);
    bool hb_ok=false;
    int  hover=-1;
 
@@ -632,6 +636,7 @@ void Render(void)
    if(hover>=0 && hover<total)
      {
       SRangeBar tb;
+      ZeroMemory(tb);
       bool ok;
       if(hover>=done && has_cur) { tb=cur; ok=true; }
       else                       { ok=g_agg.Get(hover,tb); }
@@ -775,7 +780,6 @@ void EndPlacing(void)
         {
          const double r=MathAbs(g_ghost.price2-g_ghost.price1);
          const double d=(g_ghost.type==TOOL_LONG?1.0:-1.0);
-         g_ghost.price1=g_ghost.price1;            // entry stays at the press
          g_ghost.price2=g_ghost.price1+d*r*2.0;    // target
          g_ghost.price3=g_ghost.price1-d*r;        // stop
         }

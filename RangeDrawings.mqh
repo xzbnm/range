@@ -83,7 +83,7 @@ private:
                          const uint clr,const int w);
    double            DistToSeg(const double px,const double py,
                                const double x1,const double y1,
-                               const double x2,const double y2);
+                               const double x2,const double y2) const;
 
 public:
                      CDrawings(void): m_count(0),m_cv(NULL) {}
@@ -206,7 +206,7 @@ void CDrawings::Handle(const int x,const int y,const bool hot)
 //+------------------------------------------------------------------+
 double CDrawings::DistToSeg(const double px,const double py,
                             const double x1,const double y1,
-                            const double x2,const double y2)
+                            const double x2,const double y2) const
   {
    const double dx=x2-x1, dy=y2-y1;
    const double len2=dx*dx+dy*dy;
