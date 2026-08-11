@@ -5,12 +5,13 @@ top-left panel for the range size.
 
 ## Install
 
-Copy both files into `MQL5/Indicators/` in your terminal's data folder
+Copy all three files into `MQL5/Indicators/` in your terminal's data folder
 (`File > Open Data Folder`):
 
 ```
 RangeChartCanvas.mq5     the indicator
-RangeAggregator.mqh      the engine, included from the file next to it
+RangeAggregator.mqh      the range bar engine
+RangeDrawings.mqh        drawing tools, toolbar and editing
 ```
 
 They live in the same folder, so there is nothing to put under `Include/`.
@@ -92,3 +93,44 @@ removal.
 The canvas paints over the whole chart, so MT5 indicators, EAs, drawing
 objects and the native scale are not visible on it, and the Strategy Tester
 is not usable. Scroll and zoom are the handlers above, not MT5's own.
+
+## Drawing tools
+
+A draggable toolbar sits over the chart, moved by the grip on its left edge.
+Pick a tool, draw, and it reverts to the crosshair, the same one-shape-per-pick
+behaviour TradingView has.
+
+| Tool | Points | Notes |
+|---|---|---|
+| Crosshair | - | selection mode |
+| Trend line | 2 | |
+| Ray | 2 | extends to the right edge |
+| Horizontal line | 1 | spans the plot, tagged on the price axis |
+| Vertical line | 1 | |
+| Rectangle | 2 | |
+| Fib retracement | 2 | 0 / .236 / .382 / .5 / .618 / .786 / 1 |
+| Measure | 2 | price delta, percent, bar count |
+| Text | 1 | |
+| Note | 1 | callout box with a leader |
+| Long position | 2 | entry, target, stop with R:R |
+| Short position | 2 | |
+
+Two-point tools are drawn by dragging; a plain click drops one at a default
+size. One-point tools place on click.
+
+### Editing
+
+Click a shape to select it. Handles appear at its anchors: drag a handle to
+reshape, drag the body to move, and press `Delete` to remove it. `Esc` cancels
+a placement and clears the selection. The strip under the toolbar cycles the
+colour and line width and holds a delete button; the trash cell at the end of
+the toolbar deletes the selection too.
+
+Anchors are stored as (bar index, price), never pixels, so shapes stay welded
+to their bars through scroll, zoom and price scaling.
+
+### Persistence
+
+Drawings are written to `MQL5/Files/RC_<symbol>_<range>.csv` on every change
+and reloaded on attach. Each range size keeps its own file, because changing
+the range renumbers the bars the anchors point at.

@@ -8,7 +8,8 @@
 #property indicator_plots 0
 
 #include <Canvas\Canvas.mqh>
-#include "RangeAggregator.mqh"     // sits next to this file, no Include subfolder
+#include "RangeAggregator.mqh"     // sit next to this file, no Include subfolder
+#include "RangeDrawings.mqh"
 
 //--- chart style, matching TradingView's two range-chart renderings
 enum ENUM_RC_STYLE
@@ -49,6 +50,8 @@ input color  InpText      = C'209,212,220';       // Text
 #define MK_CONTROL   0x0008
 
 //--- keys
+#define VK_ESCAPE    27
+#define VK_DELETE    46
 #define VK_END       35
 #define VK_HOME      36
 #define VK_LEFT      37
@@ -90,6 +93,26 @@ double   g_drag_shift0, g_drag_zoom0;
 //--- last fitted extent, needed to convert pixels back to price while dragging
 double   g_vis_lo = 0.0, g_vis_hi = 0.0;
 uint     g_last_paint = 0;
+
+//--- drawing layer
+CDrawings g_draw;
+SView     g_view;
+int      g_tool       = TOOL_CROSS;   // active toolbar cell
+int      g_sel        = -1;           // selected drawing
+int      g_hover      = -1;           // drawing under the cursor
+int      g_tb_hover   = -1;           // toolbar cell under the cursor
+int      g_tbx = 300, g_tby = 56;     // toolbar position
+bool     g_tb_drag    = false;
+int      g_tb_dx, g_tb_dy;
+int      g_pal        = 0;            // palette index for new drawings
+
+//--- in-progress edit
+bool     g_placing    = false;        // laying down a new drawing
+SDrawing g_ghost;                     // the one being laid down
+int      g_edit_item  = -1;           // drawing being moved or reshaped
+int      g_edit_handle= -1;           // -1 = whole body, else handle index
+double   g_edit_bar0, g_edit_price0;
+bool     g_lbtn_prev  = false;
 
 //+------------------------------------------------------------------+
 int   PlotR(void) { return(g_w-AXIS_W); }
@@ -302,6 +325,10 @@ void Rebuild(void)
       for(int i=0;i<n;i++)
          g_agg.AddM1(rates[i]);
      }
+
+   g_draw.SetFile(_Symbol,g_range_ticks);
+   g_draw.Load();
+   g_sel=-1;
 
    g_status=StringFormat("%s  R=%d (%.*f)  bars=%d  src=%s  %dms",
                          _Symbol,g_range_ticks,_Digits,g_range_ticks*g_tick_size,
@@ -529,6 +556,27 @@ void Render(void)
         }
      }
 
+   //--- the mapping every drawing is projected through
+   g_view.plot_r   = plot_r;
+   g_view.plot_t   = plot_t;
+   g_view.plot_b   = plot_b;
+   g_view.plot_h   = plot_h;
+   g_view.hi       = hi;
+   g_view.lo       = lo;
+   g_view.span     = span;
+   g_view.step     = g_step;
+   g_view.anchor_x = AnchorX();
+   g_view.last_slot= last;
+
+   g_draw.RenderAll(g_view,g_sel,_Digits);
+
+   if(g_placing)                                   // live preview of the new shape
+     {
+      const int gi=g_draw.Add(g_ghost);
+      g_draw.RenderOne(g_view,gi,false,_Digits);
+      g_draw.Remove(gi);
+     }
+
    //--- crosshair
    SRangeBar hb;
    bool hb_ok=false;
@@ -603,6 +651,36 @@ void Render(void)
    g_cv.Rectangle(6,6,6+PANEL_W,6+PANEL_H,ColorToARGB(C'67,70,81',255));
    g_cv.TextOut(14,16,"Range",ColorToARGB(InpText,255));
 
+   //--- toolbar, on top of the plot
+   TbRender(GetPointer(g_cv),g_tbx,g_tby,g_tool==TOOL_CROSS?0:-1,g_tb_hover);
+   if(g_tool!=TOOL_CROSS)
+     {
+      for(int i=0;i<=TB_N;i++)
+         if(TB_TOOLS[i]==g_tool)
+           {
+            const int cx=g_tbx+TB_GRIP+TB_PAD+i*TB_CELL+TB_CELL/2;
+            const int cy=g_tby+TB_PAD+TB_CELL/2;
+            g_cv.Rectangle(cx-12,cy-12,cx+12,cy+12,ColorToARGB(C'41,98,255',255));
+            break;
+           }
+     }
+
+   //--- properties strip for the selected drawing
+   if(g_sel>=0)
+     {
+      SDrawing sd;
+      if(g_draw.Get(g_sel,sd))
+        {
+         const int sx=g_tbx, sy=g_tby+TbHeight()+4;
+         g_cv.FillRectangle(sx,sy,sx+108,sy+24,ColorToARGB(C'30,34,45',255));
+         g_cv.Rectangle(sx,sy,sx+108,sy+24,ColorToARGB(C'67,70,81',255));
+         g_cv.FillRectangle(sx+6,sy+6,sx+24,sy+18,ColorToARGB(sd.clr,255));          // colour swatch
+         g_cv.TextOut(sx+32,sy+5,StringFormat("w%d",sd.width),
+                      ColorToARGB(InpText,255));
+         TbGlyph(GetPointer(g_cv),-1,sx+86,sy+12,ColorToARGB(C'239,83,80',255));
+        }
+     }
+
    //--- status
    g_cv.TextOut(8,g_h-16,g_status,ColorToARGB(C'120,123,134',255));
 
@@ -632,6 +710,91 @@ void ResetView(void)
    g_pzoom=1.0;
    g_pshift=0.0;
    g_shift_bars=(InpRightShift>=0?(double)InpRightShift:10.0);
+  }
+
+//+------------------------------------------------------------------+
+//| How many clicks-worth of geometry a tool needs.                  |
+//+------------------------------------------------------------------+
+bool ToolIsTwoPoint(const int t)
+  {
+   return(t==TOOL_TREND || t==TOOL_RAY  || t==TOOL_RECT ||
+          t==TOOL_FIB   || t==TOOL_MEASURE ||
+          t==TOOL_LONG  || t==TOOL_SHORT);
+  }
+
+//+------------------------------------------------------------------+
+bool InPanel(const int x,const int y)
+  {
+   return(x>=6 && x<=6+PANEL_W && y>=6 && y<=6+PANEL_H);
+  }
+
+//+------------------------------------------------------------------+
+bool InToolbar(const int x,const int y)
+  {
+   return(x>=g_tbx && x<=g_tbx+TbWidth() && y>=g_tby && y<=g_tby+TbHeight());
+  }
+
+//+------------------------------------------------------------------+
+//| Seed a new drawing from the press point.                         |
+//+------------------------------------------------------------------+
+void BeginPlacing(const double bar,const double price)
+  {
+   g_ghost.type  =g_tool;
+   g_ghost.bar1  =bar;   g_ghost.price1=price;
+   g_ghost.bar2  =bar;   g_ghost.price2=price;
+   g_ghost.price3=price;
+   g_ghost.clr   =RC_PALETTE[g_pal];
+   g_ghost.width =2;
+   g_ghost.text  =(g_tool==TOOL_TEXT||g_tool==TOOL_NOTE)?"Text":"";
+   g_ghost.alive =true;
+   g_placing     =true;
+  }
+
+//+------------------------------------------------------------------+
+//| Finish a placement, discarding degenerate one-pixel shapes.      |
+//+------------------------------------------------------------------+
+void EndPlacing(void)
+  {
+   if(!g_placing)
+      return;
+
+   g_placing=false;
+
+   if(ToolIsTwoPoint(g_ghost.type))
+     {
+      const bool tiny=(MathAbs(g_ghost.bar2-g_ghost.bar1)<0.5 &&
+                       MathAbs(g_ghost.price2-g_ghost.price1)<g_tick_size);
+      if(tiny)
+        {
+         //--- a plain click, not a drag: give it a usable default size
+         g_ghost.bar2  =g_ghost.bar1+12;
+         g_ghost.price2=g_ghost.price1+(g_vis_hi-g_vis_lo)*0.15;
+        }
+
+      if(g_ghost.type==TOOL_LONG || g_ghost.type==TOOL_SHORT)
+        {
+         const double r=MathAbs(g_ghost.price2-g_ghost.price1);
+         const double d=(g_ghost.type==TOOL_LONG?1.0:-1.0);
+         g_ghost.price1=g_ghost.price1;            // entry stays at the press
+         g_ghost.price2=g_ghost.price1+d*r*2.0;    // target
+         g_ghost.price3=g_ghost.price1-d*r;        // stop
+        }
+     }
+
+   g_sel=g_draw.Add(g_ghost);
+   g_draw.Save();
+   g_tool=TOOL_CROSS;                              // one shape per pick, like TV
+  }
+
+//+------------------------------------------------------------------+
+void DeleteSelected(void)
+  {
+   if(g_sel<0)
+      return;
+
+   g_draw.Remove(g_sel);
+   g_draw.Save();
+   g_sel=-1;
   }
 
 //+------------------------------------------------------------------+
@@ -666,6 +829,7 @@ int OnInit(void)
    if(!BuildCanvas())
       return(INIT_FAILED);
 
+   g_draw.Attach(GetPointer(g_cv));
    CreatePanelObjects();
    Rebuild();
    Repaint();
@@ -675,6 +839,7 @@ int OnInit(void)
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
+   g_draw.Save();
    g_cv.Destroy();
    ObjectDelete(0,EDIT_NAME);
    ObjectDelete(0,BTN_NAME);
@@ -730,6 +895,7 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
          if(w!=g_w || h!=g_h)
            {
             BuildCanvas();
+            g_draw.Attach(GetPointer(g_cv));
             Repaint();
            }
          return;
@@ -801,35 +967,182 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
          const int y     = (int)dparam;
          const int flags = (int)StringToInteger(sparam);
          const bool down = ((flags&MK_LBUTTON)!=0);
+         const bool press  = ( down && !g_lbtn_prev);
+         const bool release= (!down &&  g_lbtn_prev);
+         g_lbtn_prev=down;
 
          g_mx=x; g_my=y;
          g_cross=(x>=0 && x<g_w && y>=0 && y<g_h);
 
-         if(down && !g_drag)                          // drag begins
-           {
-            if(y>PlotT() && y<PlotB() && x<PlotR() && !(x<6+PANEL_W && y<6+PANEL_H))
-               g_drag_zone=1;
-            else if(x>=PlotR())
-               g_drag_zone=2;
-            else
-               g_drag_zone=0;
+         const double mbar  =XToBar  (g_view,x);
+         const double mprice=YToPrice(g_view,y);
 
-            if(g_drag_zone!=0)
+         g_tb_hover=-1;
+         const int cell=TbCellAt(g_tbx,g_tby,x,y);
+         if(cell>=0)
+            g_tb_hover=cell;
+
+         //--- 1. toolbar
+         if(press && cell!=-1)
+           {
+            if(cell==-2)                                  // grip: start dragging it
               {
-               g_drag=true;
-               g_drag_x0=x; g_drag_y0=y;
-               g_drag_scroll0=g_scroll;
-               g_drag_shift0 =g_pshift;
-               g_drag_zoom0  =g_pzoom;
+               g_tb_drag=true;
+               g_tb_dx=x-g_tbx; g_tb_dy=y-g_tby;
+              }
+            else if(TB_TOOLS[cell]<0)                     // trash cell
+               DeleteSelected();
+            else
+              {
+               g_tool=TB_TOOLS[cell];
+               g_sel=-1;
+              }
+            Repaint();
+            return;
+           }
+
+         if(g_tb_drag)
+           {
+            if(down)
+              {
+               g_tbx=x-g_tb_dx; g_tby=y-g_tb_dy;
+               if(g_tbx<0) g_tbx=0;
+               if(g_tby<0) g_tby=0;
+               if(g_tbx>g_w-TbWidth())  g_tbx=g_w-TbWidth();
+               if(g_tby>g_h-TbHeight()) g_tby=g_h-TbHeight();
+               Repaint();
+              }
+            else
+               g_tb_drag=false;
+            return;
+           }
+
+         //--- 2. properties strip of the selected drawing
+         if(press && g_sel>=0)
+           {
+            const int sx=g_tbx, sy=g_tby+TbHeight()+4;
+            if(x>=sx && x<=sx+108 && y>=sy && y<=sy+24)
+              {
+               SDrawing sd;
+               if(g_draw.Get(g_sel,sd))
+                 {
+                  if(x<=sx+24)                             // cycle colour
+                    {
+                     g_pal=(g_pal+1)%8;
+                     sd.clr=RC_PALETTE[g_pal];
+                    }
+                  else if(x<=sx+70)                        // cycle width
+                     sd.width=(sd.width%4)+1;
+                  else                                     // delete
+                    {
+                     DeleteSelected();
+                     Repaint();
+                     return;
+                    }
+                  g_draw.Set(g_sel,sd);
+                  g_draw.Save();
+                 }
+               Repaint();
+               return;
               }
            }
-         else if(!down && g_drag)                     // drag ends
+
+         const bool in_plot=(y>PlotT() && y<PlotB() && x<PlotR() &&
+                             !InPanel(x,y) && !InToolbar(x,y));
+
+         //--- 3. laying down a new drawing
+         if(g_placing)
+           {
+            if(ToolIsTwoPoint(g_ghost.type))
+              {
+               g_ghost.bar2=mbar; g_ghost.price2=mprice;
+              }
+            if(release)
+               EndPlacing();
+            Repaint();
+            return;
+           }
+
+         if(press && in_plot && g_tool!=TOOL_CROSS)
+           {
+            BeginPlacing(mbar,mprice);
+            if(!ToolIsTwoPoint(g_tool))                    // single-click tools
+               EndPlacing();
+            Repaint();
+            return;
+           }
+
+         //--- 4. editing an existing drawing
+         if(g_edit_item>=0)
+           {
+            if(down)
+              {
+               if(g_edit_handle>=0)
+                  g_draw.MoveHandle(g_edit_item,g_edit_handle,mbar,mprice);
+               else
+                  g_draw.MoveBy(g_edit_item,mbar-g_edit_bar0,mprice-g_edit_price0);
+
+               g_edit_bar0=mbar; g_edit_price0=mprice;
+               Repaint();
+              }
+            else
+              {
+               g_edit_item=-1; g_edit_handle=-1;
+               g_draw.Save();
+              }
+            return;
+           }
+
+         if(press && in_plot && g_tool==TOOL_CROSS)
+           {
+            //--- a handle of the current selection wins over everything
+            int h=(g_sel>=0)?g_draw.HitHandle(g_view,g_sel,x,y):-1;
+            if(h>=0)
+              {
+               g_edit_item=g_sel; g_edit_handle=h;
+               g_edit_bar0=mbar;  g_edit_price0=mprice;
+               return;
+              }
+
+            const int hit=g_draw.HitTest(g_view,x,y);
+            if(hit>=0)
+              {
+               g_sel=hit;
+               g_edit_item=hit; g_edit_handle=-1;
+               g_edit_bar0=mbar; g_edit_price0=mprice;
+               Repaint();
+               return;
+              }
+
+            g_sel=-1;                                      // clicked empty space
+           }
+
+         g_hover=(g_tool==TOOL_CROSS && in_plot)? g_draw.HitTest(g_view,x,y) : -1;
+
+         //--- 5. nothing drawing-related: fall through to panning the chart
+         if(down && !g_drag && in_plot)
+           {
+            g_drag=true; g_drag_zone=1;
+            g_drag_x0=x; g_drag_y0=y;
+            g_drag_scroll0=g_scroll;
+            g_drag_shift0 =g_pshift;
+            g_drag_zoom0  =g_pzoom;
+           }
+         else if(down && !g_drag && x>=PlotR())
+           {
+            g_drag=true; g_drag_zone=2;
+            g_drag_x0=x; g_drag_y0=y;
+            g_drag_scroll0=g_scroll;
+            g_drag_shift0 =g_pshift;
+            g_drag_zoom0  =g_pzoom;
+           }
+         else if(!down && g_drag)
            {
             g_drag=false;
             g_drag_zone=0;
            }
 
-         if(g_drag && g_drag_zone==1)                 // pan
+         if(g_drag && g_drag_zone==1)
            {
             g_scroll=g_drag_scroll0+(int)MathRound((x-g_drag_x0)/g_step);
 
@@ -840,7 +1153,7 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
                g_pshift=g_drag_shift0+(double)dy/PlotH()*(g_vis_hi-g_vis_lo);
               }
            }
-         else if(g_drag && g_drag_zone==2)            // vertical scale
+         else if(g_drag && g_drag_zone==2)
            {
             g_auto_scale=false;
             g_pzoom=g_drag_zoom0*MathExp((g_drag_y0-y)/140.0);
@@ -862,6 +1175,8 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
             case VK_END:   ResetView();                                      break;
             case VK_UP:    g_auto_scale=false; g_pzoom*=1.15;                break;
             case VK_DOWN:  g_auto_scale=false; g_pzoom/=1.15;                break;
+            case VK_DELETE: DeleteSelected();                                break;
+            case VK_ESCAPE: g_placing=false; g_sel=-1; g_tool=TOOL_CROSS;    break;
             default: return;
            }
          Repaint();
