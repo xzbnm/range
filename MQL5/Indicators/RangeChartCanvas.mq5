@@ -3,7 +3,7 @@
 //|            TradingView-style range chart rendered on a CCanvas   |
 //+------------------------------------------------------------------+
 #property copyright "Range Chart"
-#property version   "1.00"
+#property version   "1.10"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -20,29 +20,71 @@ input color  InpBg        = C'19,23,34';          // Background
 input color  InpGrid      = C'42,46,57';          // Grid
 input color  InpText      = C'209,212,220';       // Text
 
-//--- layout
+//--- object names
 #define CANVAS_NAME  "RCV_canvas"
 #define EDIT_NAME    "RCV_edit"
 #define BTN_NAME     "RCV_apply"
-#define AXIS_W       70
-#define PLOT_TOP     46
-#define PLOT_BOT     20
-#define PANEL_W      168
+#define BTN_HOME     "RCV_home"
+
+//--- layout
+#define AXIS_W       74
+#define PLOT_TOP     48
+#define PLOT_BOT     22
+#define PANEL_W      176
 #define PANEL_H      38
+
+//--- mouse flags
+#define MK_LBUTTON   0x0001
+#define MK_SHIFT     0x0004
+#define MK_CONTROL   0x0008
+
+//--- keys
+#define VK_END       35
+#define VK_HOME      36
+#define VK_LEFT      37
+#define VK_UP        38
+#define VK_RIGHT     39
+#define VK_DOWN      40
 
 //--- state
 CCanvas          g_cv;
 CRangeAggregator g_agg;
 
 int      g_range_ticks = 100;
-int      g_step        = 8;
-int      g_scroll      = 0;        // bars hidden past the right edge
+double   g_step        = 8.0;     // px per bar, fractional so zoom is smooth
+int      g_scroll      = 0;       // bars hidden past the right edge
 double   g_tick_size   = 0.0;
 ulong    g_last_msc    = 0;
-datetime g_seed_from   = 0;
 int      g_w = 0, g_h = 0;
 string   g_status      = "";
 bool     g_dirty       = true;
+
+//--- vertical scale
+bool     g_auto_scale  = true;
+double   g_pzoom       = 1.0;     // 1.0 = fit
+double   g_pshift      = 0.0;     // price offset from the fitted centre
+
+//--- pointer
+int      g_mx = -1, g_my = -1;
+bool     g_cross       = false;
+
+//--- drag
+bool     g_drag        = false;
+int      g_drag_zone   = 0;       // 1 = plot, 2 = price axis
+int      g_drag_x0, g_drag_y0;
+int      g_drag_scroll0;
+double   g_drag_shift0, g_drag_zoom0;
+
+//--- last fitted extent, needed to convert pixels back to price while dragging
+double   g_vis_lo = 0.0, g_vis_hi = 0.0;
+uint     g_last_paint = 0;
+
+//+------------------------------------------------------------------+
+int   PlotR(void) { return(g_w-AXIS_W); }
+int   PlotT(void) { return(PLOT_TOP);   }
+int   PlotB(void) { return(g_h-PLOT_BOT); }
+int   PlotH(void) { return(PlotB()-PlotT()); }
+int   BarCount(void) { return(g_agg.Total()+(g_agg.HasCurrent()?1:0)); }
 
 //+------------------------------------------------------------------+
 datetime StartOfWeek(const datetime now)
@@ -54,16 +96,40 @@ datetime StartOfWeek(const datetime now)
   }
 
 //+------------------------------------------------------------------+
+void ClampView(void)
+  {
+   if(g_step<1.0)  g_step=1.0;
+   if(g_step>60.0) g_step=60.0;
+
+   const int total=BarCount();
+   if(g_scroll<0)       g_scroll=0;
+   if(g_scroll>total-1) g_scroll=(total>0?total-1:0);
+
+   if(g_pzoom<0.15) g_pzoom=0.15;
+   if(g_pzoom>25.0) g_pzoom=25.0;
+  }
+
+//+------------------------------------------------------------------+
+//| index of the bar drawn under pixel x (may be out of range)       |
+//+------------------------------------------------------------------+
+int BarAtX(const int x)
+  {
+   const double k=(PlotR()-2-x)/g_step;          // bars left of the right edge
+   const int    last=BarCount()-1-g_scroll;
+   return(last-(int)MathFloor(k));
+  }
+
+//+------------------------------------------------------------------+
 void CreatePanelObjects(void)
   {
    if(ObjectFind(0,EDIT_NAME)<0)
      {
       ObjectCreate(0,EDIT_NAME,OBJ_EDIT,0,0,0);
       ObjectSetInteger(0,EDIT_NAME,OBJPROP_CORNER,CORNER_LEFT_UPPER);
-      ObjectSetInteger(0,EDIT_NAME,OBJPROP_XDISTANCE,64);
+      ObjectSetInteger(0,EDIT_NAME,OBJPROP_XDISTANCE,66);
       ObjectSetInteger(0,EDIT_NAME,OBJPROP_YDISTANCE,14);
-      ObjectSetInteger(0,EDIT_NAME,OBJPROP_XSIZE,52);
-      ObjectSetInteger(0,EDIT_NAME,OBJPROP_YSIZE,18);
+      ObjectSetInteger(0,EDIT_NAME,OBJPROP_XSIZE,54);
+      ObjectSetInteger(0,EDIT_NAME,OBJPROP_YSIZE,20);
       ObjectSetInteger(0,EDIT_NAME,OBJPROP_BGCOLOR,C'30,34,45');
       ObjectSetInteger(0,EDIT_NAME,OBJPROP_BORDER_COLOR,C'67,70,81');
       ObjectSetInteger(0,EDIT_NAME,OBJPROP_COLOR,InpText);
@@ -78,10 +144,10 @@ void CreatePanelObjects(void)
      {
       ObjectCreate(0,BTN_NAME,OBJ_BUTTON,0,0,0);
       ObjectSetInteger(0,BTN_NAME,OBJPROP_CORNER,CORNER_LEFT_UPPER);
-      ObjectSetInteger(0,BTN_NAME,OBJPROP_XDISTANCE,122);
+      ObjectSetInteger(0,BTN_NAME,OBJPROP_XDISTANCE,126);
       ObjectSetInteger(0,BTN_NAME,OBJPROP_YDISTANCE,14);
-      ObjectSetInteger(0,BTN_NAME,OBJPROP_XSIZE,52);
-      ObjectSetInteger(0,BTN_NAME,OBJPROP_YSIZE,18);
+      ObjectSetInteger(0,BTN_NAME,OBJPROP_XSIZE,54);
+      ObjectSetInteger(0,BTN_NAME,OBJPROP_YSIZE,20);
       ObjectSetInteger(0,BTN_NAME,OBJPROP_BGCOLOR,C'41,98,255');
       ObjectSetInteger(0,BTN_NAME,OBJPROP_BORDER_COLOR,C'41,98,255');
       ObjectSetInteger(0,BTN_NAME,OBJPROP_COLOR,clrWhite);
@@ -91,6 +157,32 @@ void CreatePanelObjects(void)
       ObjectSetString(0,BTN_NAME,OBJPROP_TEXT,"Apply");
      }
    ObjectSetInteger(0,BTN_NAME,OBJPROP_STATE,false);
+
+   //--- "back to realtime", shown only when the view is scrolled back
+   if(ObjectFind(0,BTN_HOME)<0)
+     {
+      ObjectCreate(0,BTN_HOME,OBJ_BUTTON,0,0,0);
+      ObjectSetInteger(0,BTN_HOME,OBJPROP_CORNER,CORNER_RIGHT_LOWER);
+      ObjectSetInteger(0,BTN_HOME,OBJPROP_XDISTANCE,AXIS_W+34);
+      ObjectSetInteger(0,BTN_HOME,OBJPROP_YDISTANCE,34);
+      ObjectSetInteger(0,BTN_HOME,OBJPROP_XSIZE,26);
+      ObjectSetInteger(0,BTN_HOME,OBJPROP_YSIZE,22);
+      ObjectSetInteger(0,BTN_HOME,OBJPROP_BGCOLOR,C'30,34,45');
+      ObjectSetInteger(0,BTN_HOME,OBJPROP_BORDER_COLOR,C'67,70,81');
+      ObjectSetInteger(0,BTN_HOME,OBJPROP_COLOR,InpText);
+      ObjectSetInteger(0,BTN_HOME,OBJPROP_FONTSIZE,10);
+      ObjectSetInteger(0,BTN_HOME,OBJPROP_ZORDER,10);
+      ObjectSetInteger(0,BTN_HOME,OBJPROP_SELECTABLE,false);
+      ObjectSetString(0,BTN_HOME,OBJPROP_TEXT,">|");
+     }
+   ObjectSetInteger(0,BTN_HOME,OBJPROP_STATE,false);
+  }
+
+//+------------------------------------------------------------------+
+void SyncHomeButton(void)
+  {
+   const bool show=(g_scroll>0 || !g_auto_scale);
+   ObjectSetInteger(0,BTN_HOME,OBJPROP_TIMEFRAMES,show?OBJ_ALL_PERIODS:OBJ_NO_PERIODS);
   }
 
 //+------------------------------------------------------------------+
@@ -113,8 +205,6 @@ bool BuildCanvas(void)
   }
 
 //+------------------------------------------------------------------+
-//| Rebuild the whole series from the start of the current week.     |
-//+------------------------------------------------------------------+
 void Rebuild(void)
   {
    const uint t0=GetTickCount();
@@ -126,9 +216,12 @@ void Rebuild(void)
    g_agg.Init(g_range_ticks*g_tick_size,g_tick_size);
    g_scroll=0;
    g_last_msc=0;
+   g_auto_scale=true;
+   g_pzoom=1.0;
+   g_pshift=0.0;
 
-   g_seed_from=StartOfWeek(TimeCurrent());
-   const datetime to=TimeCurrent()+60;
+   const datetime from=StartOfWeek(TimeCurrent());
+   const datetime to  =TimeCurrent()+60;
 
    long   ticks_used=0;
    string src="ticks";
@@ -138,7 +231,7 @@ void Rebuild(void)
       MqlTick buf[];
       const int CHUNK=6*3600;                       // 6h chunks, bounds memory
 
-      for(datetime a=g_seed_from; a<to; a+=CHUNK)
+      for(datetime a=from; a<to; a+=CHUNK)
         {
          const datetime b=(datetime)MathMin((long)a+CHUNK,(long)to);
          const int n=CopyTicksRange(_Symbol,buf,COPY_TICKS_INFO,
@@ -160,7 +253,7 @@ void Rebuild(void)
      {
       src="M1";
       MqlRates rates[];
-      const int n=CopyRates(_Symbol,PERIOD_M1,g_seed_from,to,rates);
+      const int n=CopyRates(_Symbol,PERIOD_M1,from,to,rates);
       for(int i=0;i<n;i++)
          g_agg.AddM1(rates[i]);
      }
@@ -171,8 +264,6 @@ void Rebuild(void)
    g_dirty=true;
   }
 
-//+------------------------------------------------------------------+
-//| Feed only the ticks that arrived since the last call.            |
 //+------------------------------------------------------------------+
 void PumpLive(void)
   {
@@ -217,26 +308,48 @@ double NiceStep(const double raw)
   }
 
 //+------------------------------------------------------------------+
+void DashH(const int x1,const int x2,const int y,const uint clr,const int on=4,const int off=4)
+  {
+   for(int x=x1;x<x2;x+=on+off)
+      g_cv.LineHorizontal(x,(int)MathMin(x+on,x2),y,clr);
+  }
+
+//+------------------------------------------------------------------+
+void DashV(const int y1,const int y2,const int x,const uint clr,const int on=4,const int off=4)
+  {
+   for(int y=y1;y<y2;y+=on+off)
+      g_cv.LineVertical(x,y,(int)MathMin(y+on,y2),clr);
+  }
+
+//+------------------------------------------------------------------+
+void PriceTag(const int y,const string txt,const uint bg,const uint fg)
+  {
+   if(y<PlotT()-10 || y>PlotB()+10)
+      return;
+
+   g_cv.FillRectangle(PlotR()+1,y-9,g_w,y+9,bg);
+   g_cv.TextOut(PlotR()+6,y-7,txt,fg);
+  }
+
+//+------------------------------------------------------------------+
 void Render(void)
   {
    if(g_w<80 || g_h<80)
       return;
 
-   const int plot_r = g_w-AXIS_W;
-   const int plot_t = PLOT_TOP;
-   const int plot_b = g_h-PLOT_BOT;
-   const int plot_h = plot_b-plot_t;
+   ClampView();
+
+   const int plot_r=PlotR(), plot_t=PlotT(), plot_b=PlotB(), plot_h=PlotH();
    if(plot_h<40 || plot_r<40)
       return;
 
    g_cv.Erase(ColorToARGB(InpBg,255));
    g_cv.FontSet("Tahoma",-100);
 
-   //--- assemble the visible slice (completed bars + the forming one)
    const int done  = g_agg.Total();
    SRangeBar cur;
    const bool has_cur = g_agg.Current(cur);
-   const int total = done+(has_cur?1:0);
+   const int  total   = done+(has_cur?1:0);
 
    if(total<=0)
      {
@@ -245,18 +358,14 @@ void Render(void)
       return;
      }
 
-   if(g_step<2)  g_step=2;
-   int nvis=(plot_r-4)/g_step;
+   int nvis=(int)MathCeil((plot_r-4)/g_step);
    if(nvis<1) nvis=1;
-
-   if(g_scroll<0)             g_scroll=0;
-   if(g_scroll>total-1)       g_scroll=total-1;
 
    const int last  = total-1-g_scroll;
    int       first = last-nvis+1;
    if(first<0) first=0;
 
-   //--- price extent
+   //--- fitted price extent
    double lo=DBL_MAX, hi=-DBL_MAX;
    for(int i=first;i<=last;i++)
      {
@@ -273,9 +382,18 @@ void Render(void)
       return;
      }
 
-   const double pad=(hi-lo)*0.08+g_tick_size;
-   hi+=pad; lo-=pad;
+   double pad=(hi-lo)*0.08+g_tick_size;
+   double c  =(hi+lo)*0.5+g_pshift;
+   double half=((hi-lo)*0.5+pad)/g_pzoom;
+   hi=c+half; lo=c-half;
+
+   g_vis_hi=hi; g_vis_lo=lo;
    const double span=hi-lo;
+   if(span<=0.0)
+     {
+      g_cv.Update();
+      return;
+     }
 
    //--- grid + price axis
    const double gstep=NiceStep(span/6.0);
@@ -285,11 +403,11 @@ void Render(void)
       g_cv.LineHorizontal(0,plot_r,y,ColorToARGB(InpGrid,255));
       g_cv.TextOut(plot_r+6,y-7,DoubleToString(p,_Digits),ColorToARGB(InpText,255));
      }
-   g_cv.LineVertical(plot_r,plot_t-PLOT_TOP,g_h,ColorToARGB(InpGrid,255));
+   g_cv.LineVertical(plot_r,0,g_h,ColorToARGB(InpGrid,255));
 
    //--- bars
-   const int body=(g_step>=5? g_step-3 : 1);
-   const int half=body/2;
+   const int body=(int)MathMax(1,MathRound(g_step)-3);
+   const int half_w=body/2;
 
    for(int i=first;i<=last;i++)
      {
@@ -298,98 +416,176 @@ void Render(void)
       if(forming) b=cur;
       else if(!g_agg.Get(i,b)) continue;
 
-      const int cx=plot_r-2-(last-i)*g_step-g_step/2;
-      if(cx<0) continue;
+      const int cx=plot_r-2-(int)MathRound((last-i)*g_step+g_step*0.5);
+      if(cx<0 || cx>plot_r) continue;
 
       const int yh=plot_t+(int)((hi-b.high )/span*plot_h);
       const int yl=plot_t+(int)((hi-b.low  )/span*plot_h);
       const int yo=plot_t+(int)((hi-b.open )/span*plot_h);
       const int yc=plot_t+(int)((hi-b.close)/span*plot_h);
 
-      const color  c   = (b.close>=b.open ? InpBull : InpBear);
-      const uint   arg = ColorToARGB(c,255);
+      const uint arg=ColorToARGB(b.close>=b.open?InpBull:InpBear,255);
 
       g_cv.LineVertical(cx,yh,yl,arg);
 
       int y1=MathMin(yo,yc), y2=MathMax(yo,yc);
       if(y2-y1<1) y2=y1+1;
-      g_cv.FillRectangle(cx-half,y1,cx+half,y2,arg);
+      if(half_w>0) g_cv.FillRectangle(cx-half_w,y1,cx+half_w,y2,arg);
 
-      if(forming)                                   // outline the live bar
-         g_cv.Rectangle(cx-half-1,y1-1,cx+half+1,y2+1,ColorToARGB(clrWhite,255));
+      if(forming)
+         g_cv.Rectangle(cx-half_w-1,y1-1,cx+half_w+1,y2+1,ColorToARGB(clrWhite,255));
      }
 
-   //--- forming bar: close level + the two completion targets
+   //--- forming bar: close level and both completion targets
    if(has_cur && g_scroll==0)
      {
       double up,dn;
       g_agg.PendingLevels(up,dn);
 
-      const int yc=plot_t+(int)((hi-cur.close)/span*plot_h);
-      if(yc>=plot_t && yc<=plot_b)
-        {
-         for(int x=0;x<plot_r;x+=6)
-            g_cv.LineHorizontal(x,x+3,yc,ColorToARGB(InpText,255));
-
-         const color cc=(cur.close>=cur.open?InpBull:InpBear);
-         g_cv.FillRectangle(plot_r+1,yc-8,g_w,yc+8,ColorToARGB(cc,255));
-         g_cv.TextOut(plot_r+6,yc-7,DoubleToString(cur.close,_Digits),
-                      ColorToARGB(clrWhite,255));
-        }
-
       const int yu=plot_t+(int)((hi-up)/span*plot_h);
       const int yd=plot_t+(int)((hi-dn)/span*plot_h);
-      for(int x=0;x<plot_r;x+=10)
+      if(yu>plot_t && yu<plot_b) DashH(0,plot_r,yu,ColorToARGB(InpBull,255),5,6);
+      if(yd>plot_t && yd<plot_b) DashH(0,plot_r,yd,ColorToARGB(InpBear,255),5,6);
+
+      const int yc=plot_t+(int)((hi-cur.close)/span*plot_h);
+      if(yc>plot_t && yc<plot_b)
         {
-         g_cv.LineHorizontal(x,x+4,yu,ColorToARGB(InpBull,255));
-         g_cv.LineHorizontal(x,x+4,yd,ColorToARGB(InpBear,255));
+         DashH(0,plot_r,yc,ColorToARGB(InpText,255),3,4);
+         PriceTag(yc,DoubleToString(cur.close,_Digits),
+                  ColorToARGB(cur.close>=cur.open?InpBull:InpBear,255),
+                  ColorToARGB(clrWhite,255));
         }
      }
 
-   //--- header: OHLC of the bar at the right edge (TradingView style)
+   //--- crosshair
    SRangeBar hb;
    bool hb_ok=false;
-   if(last>=done && has_cur)        { hb=cur; hb_ok=true; }
-   else if(last>=0)                 { hb_ok=g_agg.Get(last,hb); }
+   int  hover=-1;
 
+   if(g_cross && g_mx>=0 && g_mx<plot_r && g_my>plot_t && g_my<plot_b)
+     {
+      DashV(plot_t,plot_b,g_mx,ColorToARGB(C'110,115,130',255),4,4);
+      DashH(0,plot_r,g_my,ColorToARGB(C'110,115,130',255),4,4);
+
+      const double pc=hi-(double)(g_my-plot_t)/plot_h*span;
+      PriceTag(g_my,DoubleToString(pc,_Digits),
+               ColorToARGB(C'80,86,102',255),ColorToARGB(clrWhite,255));
+
+      hover=BarAtX(g_mx);
+      if(hover>=0 && hover<total)
+        {
+         if(hover>=done && has_cur) { hb=cur;   hb_ok=true; }
+         else                       { hb_ok=g_agg.Get(hover,hb); }
+        }
+     }
+
+   if(!hb_ok)                                        // fall back to the rightmost bar
+     {
+      if(last>=done && has_cur) { hb=cur; hb_ok=true; }
+      else if(last>=0)          { hb_ok=g_agg.Get(last,hb); }
+     }
+
+   //--- header, TradingView style
    if(hb_ok)
      {
       const uint hc=ColorToARGB(hb.close>=hb.open?InpBull:InpBear,255);
-      int x=PANEL_W+14;
-      const string parts[4]={"O","H","L","C"};
-      const double vals[4] ={hb.open,hb.high,hb.low,hb.close};
+      int x=PANEL_W+16;
+      const string keys[4]={"O","H","L","C"};
+      const double vals[4]={hb.open,hb.high,hb.low,hb.close};
 
       for(int k=0;k<4;k++)
         {
-         g_cv.TextOut(x,10,parts[k],ColorToARGB(InpText,255));
+         g_cv.TextOut(x,10,keys[k],ColorToARGB(InpText,255));
          x+=12;
          const string s=DoubleToString(vals[k],_Digits);
          g_cv.TextOut(x,10,s,hc);
          x+=(int)g_cv.TextWidth(s)+10;
         }
+
       g_cv.TextOut(x,10,StringFormat("Vol %I64d",hb.volume),ColorToARGB(InpText,255));
+      x+=76;
+      g_cv.TextOut(x,10,TimeToString(hb.time_close,TIME_DATE|TIME_MINUTES),
+                   ColorToARGB(C'120,123,134',255));
      }
 
-   //--- panel chrome (the input box itself is a real OBJ_EDIT on top)
+   //--- time label under the crosshair
+   if(hover>=0 && hover<total)
+     {
+      SRangeBar tb;
+      bool ok;
+      if(hover>=done && has_cur) { tb=cur; ok=true; }
+      else                       { ok=g_agg.Get(hover,tb); }
+
+      if(ok)
+        {
+         const string ts=TimeToString(tb.time_close,TIME_MINUTES|TIME_SECONDS);
+         const int    tw=(int)g_cv.TextWidth(ts);
+         g_cv.FillRectangle(g_mx-tw/2-6,g_h-20,g_mx+tw/2+6,g_h-2,
+                            ColorToARGB(C'80,86,102',255));
+         g_cv.TextOut(g_mx-tw/2,g_h-18,ts,ColorToARGB(clrWhite,255));
+        }
+     }
+
+   //--- panel chrome (the input box is a real OBJ_EDIT on top)
    g_cv.FillRectangle(6,6,6+PANEL_W,6+PANEL_H,ColorToARGB(C'30,34,45',255));
    g_cv.Rectangle(6,6,6+PANEL_W,6+PANEL_H,ColorToARGB(C'67,70,81',255));
-   g_cv.TextOut(14,14,"Range",ColorToARGB(InpText,255));
+   g_cv.TextOut(14,16,"Range",ColorToARGB(InpText,255));
 
-   //--- status line
+   //--- status
    g_cv.TextOut(8,g_h-16,g_status,ColorToARGB(C'120,123,134',255));
-   g_cv.TextOut(plot_r-190,g_h-16,"wheel: scroll   ctrl+wheel: zoom",
+
+   const string hint=(g_auto_scale?"auto":"manual");
+   g_cv.TextOut(plot_r-150,g_h-16,
+                StringFormat("zoom %.1fpx  scale %s",g_step,hint),
                 ColorToARGB(C'120,123,134',255));
 
    g_cv.Update();
+   g_last_paint=GetTickCount();
+  }
+
+//+------------------------------------------------------------------+
+void Repaint(void)
+  {
+   Render();
+   SyncHomeButton();
+   ChartRedraw();
+   g_dirty=false;
+  }
+
+//+------------------------------------------------------------------+
+void ResetView(void)
+  {
+   g_scroll=0;
+   g_auto_scale=true;
+   g_pzoom=1.0;
+   g_pshift=0.0;
+  }
+
+//+------------------------------------------------------------------+
+//| Horizontal zoom that keeps the bar under the cursor in place.    |
+//+------------------------------------------------------------------+
+void ZoomAt(const int px,const double factor)
+  {
+   const int    x  = (px>=0 && px<PlotR()) ? px : PlotR()-2;
+   const double k0 = (PlotR()-2-x)/g_step;
+
+   g_step*=factor;
+   ClampView();
+
+   const double k1=(PlotR()-2-x)/g_step;
+   g_scroll+=(int)MathRound(k0-k1);
+   ClampView();
   }
 
 //+------------------------------------------------------------------+
 int OnInit(void)
   {
    g_range_ticks=(InpRange>0?InpRange:100);
-   g_step       =(InpBarStep>1?InpBarStep:8);
+   g_step       =(InpBarStep>1?(double)InpBarStep:8.0);
 
    ChartSetInteger(0,CHART_EVENT_MOUSE_WHEEL,true);
+   ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,true);
+   ChartSetInteger(0,CHART_MOUSE_SCROLL,false);      // stop the chart underneath from moving
    ChartSetInteger(0,CHART_FOREGROUND,false);
 
    if(!BuildCanvas())
@@ -397,8 +593,7 @@ int OnInit(void)
 
    CreatePanelObjects();
    Rebuild();
-   Render();
-   ChartRedraw();
+   Repaint();
    return(INIT_SUCCEEDED);
   }
 
@@ -408,7 +603,9 @@ void OnDeinit(const int reason)
    g_cv.Destroy();
    ObjectDelete(0,EDIT_NAME);
    ObjectDelete(0,BTN_NAME);
+   ObjectDelete(0,BTN_HOME);
    ObjectDelete(0,CANVAS_NAME);
+   ChartSetInteger(0,CHART_MOUSE_SCROLL,true);
    ChartRedraw();
   }
 
@@ -426,79 +623,167 @@ int OnCalculate(const int rates_total,
   {
    PumpLive();
 
-   if(g_dirty)
-     {
-      Render();
-      ChartRedraw();
-      g_dirty=false;
-     }
+   if(g_dirty && GetTickCount()-g_last_paint>=25)     // cap live repaints at ~40fps
+      Repaint();
 
    return(rates_total);
   }
 
 //+------------------------------------------------------------------+
+void ApplyRangeFromEdit(void)
+  {
+   const int v=(int)StringToInteger(ObjectGetString(0,EDIT_NAME,OBJPROP_TEXT));
+   if(v>0 && v!=g_range_ticks)
+     {
+      g_range_ticks=v;
+      Rebuild();
+     }
+   ObjectSetString(0,EDIT_NAME,OBJPROP_TEXT,IntegerToString(g_range_ticks));
+   Repaint();
+  }
+
+//+------------------------------------------------------------------+
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
   {
-   if(id==CHARTEVENT_CHART_CHANGE)
+   switch(id)
      {
-      const int w=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS);
-      const int h=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS);
-      if(w!=g_w || h!=g_h)
+      case CHARTEVENT_CHART_CHANGE:
         {
-         BuildCanvas();
-         g_dirty=true;
-        }
-      return;
-     }
-
-   if(id==CHARTEVENT_OBJECT_CLICK && sparam==BTN_NAME)
-     {
-      const int v=(int)StringToInteger(ObjectGetString(0,EDIT_NAME,OBJPROP_TEXT));
-      if(v>0)
-        {
-         g_range_ticks=v;
-         Rebuild();
-        }
-      ObjectSetInteger(0,BTN_NAME,OBJPROP_STATE,false);
-      ObjectSetString(0,EDIT_NAME,OBJPROP_TEXT,IntegerToString(g_range_ticks));
-      Render();
-      ChartRedraw();
-      return;
-     }
-
-   if(id==CHARTEVENT_OBJECT_ENDEDIT && sparam==EDIT_NAME)
-     {
-      const int v=(int)StringToInteger(ObjectGetString(0,EDIT_NAME,OBJPROP_TEXT));
-      if(v>0)
-        {
-         g_range_ticks=v;
-         Rebuild();
-        }
-      ObjectSetString(0,EDIT_NAME,OBJPROP_TEXT,IntegerToString(g_range_ticks));
-      Render();
-      ChartRedraw();
-      return;
-     }
-
-   if(id==CHARTEVENT_MOUSE_WHEEL)
-     {
-      const int  delta = (int)(lparam>>16);
-      const bool ctrl  = ((lparam&0x0008)!=0);
-
-      if(ctrl)
-        {
-         g_step += (delta>0? 1 : -1);
-         if(g_step<2)  g_step=2;
-         if(g_step>40) g_step=40;
-        }
-      else
-        {
-         g_scroll += (delta>0? 5 : -5);
-         if(g_scroll<0) g_scroll=0;
+         const int w=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS);
+         const int h=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS);
+         if(w!=g_w || h!=g_h)
+           {
+            BuildCanvas();
+            Repaint();
+           }
+         return;
         }
 
-      Render();
-      ChartRedraw();
+      case CHARTEVENT_OBJECT_CLICK:
+        {
+         if(sparam==BTN_NAME)
+           {
+            ObjectSetInteger(0,BTN_NAME,OBJPROP_STATE,false);
+            ApplyRangeFromEdit();
+           }
+         else if(sparam==BTN_HOME)
+           {
+            ObjectSetInteger(0,BTN_HOME,OBJPROP_STATE,false);
+            ResetView();
+            Repaint();
+           }
+         return;
+        }
+
+      case CHARTEVENT_OBJECT_ENDEDIT:
+        {
+         if(sparam==EDIT_NAME)
+            ApplyRangeFromEdit();
+         return;
+        }
+
+      //--- lparam packs coords and modifier flags, dparam carries the delta
+      case CHARTEVENT_MOUSE_WHEEL:
+        {
+         const int x     = (int)(short)lparam;
+         const int flags = (int)(lparam>>32);
+         const int delta = (int)dparam;
+         if(delta==0)
+            return;
+
+         const bool ctrl  = ((flags&MK_CONTROL)!=0);
+         const bool shift = ((flags&MK_SHIFT)!=0);
+
+         if(ctrl)                                     // vertical zoom
+           {
+            g_auto_scale=false;
+            g_pzoom*=(delta>0?1.15:1.0/1.15);
+           }
+         else if(shift)                               // horizontal pan
+           {
+            const int stepbars=(int)MathMax(1,MathRound(4.0*40.0/g_step));
+            g_scroll+=(delta>0?stepbars:-stepbars);
+           }
+         else                                         // horizontal zoom at cursor
+            ZoomAt(x,(delta>0?1.2:1.0/1.2));
+
+         Repaint();
+         return;
+        }
+
+      //--- lparam = X, dparam = Y, sparam = button flags
+      case CHARTEVENT_MOUSE_MOVE:
+        {
+         const int x     = (int)lparam;
+         const int y     = (int)dparam;
+         const int flags = (int)StringToInteger(sparam);
+         const bool down = ((flags&MK_LBUTTON)!=0);
+
+         g_mx=x; g_my=y;
+         g_cross=(x>=0 && x<g_w && y>=0 && y<g_h);
+
+         if(down && !g_drag)                          // drag begins
+           {
+            if(y>PlotT() && y<PlotB() && x<PlotR() && !(x<6+PANEL_W && y<6+PANEL_H))
+               g_drag_zone=1;
+            else if(x>=PlotR())
+               g_drag_zone=2;
+            else
+               g_drag_zone=0;
+
+            if(g_drag_zone!=0)
+              {
+               g_drag=true;
+               g_drag_x0=x; g_drag_y0=y;
+               g_drag_scroll0=g_scroll;
+               g_drag_shift0 =g_pshift;
+               g_drag_zoom0  =g_pzoom;
+              }
+           }
+         else if(!down && g_drag)                     // drag ends
+           {
+            g_drag=false;
+            g_drag_zone=0;
+           }
+
+         if(g_drag && g_drag_zone==1)                 // pan
+           {
+            g_scroll=g_drag_scroll0+(int)MathRound((x-g_drag_x0)/g_step);
+
+            const int dy=y-g_drag_y0;
+            if(MathAbs(dy)>2 && PlotH()>0)
+              {
+               g_auto_scale=false;
+               g_pshift=g_drag_shift0+(double)dy/PlotH()*(g_vis_hi-g_vis_lo);
+              }
+           }
+         else if(g_drag && g_drag_zone==2)            // vertical scale
+           {
+            g_auto_scale=false;
+            g_pzoom=g_drag_zoom0*MathExp((g_drag_y0-y)/140.0);
+           }
+
+         if(GetTickCount()-g_last_paint>=16)
+            Repaint();
+         return;
+        }
+
+      case CHARTEVENT_KEYDOWN:
+        {
+         const int total=BarCount();
+         switch((int)lparam)
+           {
+            case VK_LEFT:  g_scroll+=(int)MathMax(1,MathRound(40.0/g_step)); break;
+            case VK_RIGHT: g_scroll-=(int)MathMax(1,MathRound(40.0/g_step)); break;
+            case VK_HOME:  g_scroll=total-1;                                 break;
+            case VK_END:   ResetView();                                      break;
+            case VK_UP:    g_auto_scale=false; g_pzoom*=1.15;                break;
+            case VK_DOWN:  g_auto_scale=false; g_pzoom/=1.15;                break;
+            default: return;
+           }
+         Repaint();
+         return;
+        }
      }
   }
 //+------------------------------------------------------------------+
