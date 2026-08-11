@@ -10,7 +10,15 @@
 #include <Canvas\Canvas.mqh>
 #include <RangeChart\RangeAggregator.mqh>
 
+//--- chart style, matching TradingView's two range-chart renderings
+enum ENUM_RC_STYLE
+  {
+   RC_BARS    = 0,   // Bars (OHLC)
+   RC_CANDLES = 1    // Candles
+  };
+
 //--- inputs
+input ENUM_RC_STYLE InpStyle = RC_BARS;           // Chart style
 input int    InpRange     = 100;                  // Range (ticks)
 input int    InpBarStep   = 8;                    // Bar spacing (px)
 input bool   InpUseTicks  = true;                 // Seed from real ticks (else M1)
@@ -25,12 +33,13 @@ input color  InpText      = C'209,212,220';       // Text
 #define EDIT_NAME    "RCV_edit"
 #define BTN_NAME     "RCV_apply"
 #define BTN_HOME     "RCV_home"
+#define BTN_STYLE    "RCV_style"
 
 //--- layout
 #define AXIS_W       74
 #define PLOT_TOP     48
 #define PLOT_BOT     22
-#define PANEL_W      176
+#define PANEL_W      248
 #define PANEL_H      38
 
 //--- mouse flags
@@ -51,6 +60,7 @@ CCanvas          g_cv;
 CRangeAggregator g_agg;
 
 int      g_range_ticks = 100;
+ENUM_RC_STYLE g_style  = RC_BARS;
 double   g_step        = 8.0;     // px per bar, fractional so zoom is smooth
 int      g_scroll      = 0;       // bars hidden past the right edge
 double   g_tick_size   = 0.0;
@@ -157,6 +167,25 @@ void CreatePanelObjects(void)
       ObjectSetString(0,BTN_NAME,OBJPROP_TEXT,"Apply");
      }
    ObjectSetInteger(0,BTN_NAME,OBJPROP_STATE,false);
+
+   //--- style toggle, Bars <-> Candles
+   if(ObjectFind(0,BTN_STYLE)<0)
+     {
+      ObjectCreate(0,BTN_STYLE,OBJ_BUTTON,0,0,0);
+      ObjectSetInteger(0,BTN_STYLE,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+      ObjectSetInteger(0,BTN_STYLE,OBJPROP_XDISTANCE,186);
+      ObjectSetInteger(0,BTN_STYLE,OBJPROP_YDISTANCE,14);
+      ObjectSetInteger(0,BTN_STYLE,OBJPROP_XSIZE,60);
+      ObjectSetInteger(0,BTN_STYLE,OBJPROP_YSIZE,20);
+      ObjectSetInteger(0,BTN_STYLE,OBJPROP_BGCOLOR,C'30,34,45');
+      ObjectSetInteger(0,BTN_STYLE,OBJPROP_BORDER_COLOR,C'67,70,81');
+      ObjectSetInteger(0,BTN_STYLE,OBJPROP_COLOR,InpText);
+      ObjectSetInteger(0,BTN_STYLE,OBJPROP_FONTSIZE,9);
+      ObjectSetInteger(0,BTN_STYLE,OBJPROP_ZORDER,10);
+      ObjectSetInteger(0,BTN_STYLE,OBJPROP_SELECTABLE,false);
+     }
+   ObjectSetInteger(0,BTN_STYLE,OBJPROP_STATE,false);
+   ObjectSetString(0,BTN_STYLE,OBJPROP_TEXT,g_style==RC_BARS?"Bars":"Candles");
 
    //--- "back to realtime", shown only when the view is scrolled back
    if(ObjectFind(0,BTN_HOME)<0)
@@ -322,6 +351,22 @@ void DashV(const int y1,const int y2,const int x,const uint clr,const int on=4,c
   }
 
 //+------------------------------------------------------------------+
+//| Strokes with a width, since CCanvas lines are always 1px.        |
+//+------------------------------------------------------------------+
+void VLine(const int x,const int y1,const int y2,const int w,const uint clr)
+  {
+   if(w<=1) { g_cv.LineVertical(x,y1,y2,clr); return; }
+   g_cv.FillRectangle(x-(w-1)/2,y1,x+w/2,y2,clr);
+  }
+
+//+------------------------------------------------------------------+
+void HLine(const int x1,const int x2,const int y,const int w,const uint clr)
+  {
+   if(w<=1) { g_cv.LineHorizontal(x1,x2,y,clr); return; }
+   g_cv.FillRectangle(x1,y-(w-1)/2,x2,y+w/2,clr);
+  }
+
+//+------------------------------------------------------------------+
 void PriceTag(const int y,const string txt,const uint bg,const uint fg)
   {
    if(y<PlotT()-10 || y>PlotB()+10)
@@ -406,8 +451,9 @@ void Render(void)
    g_cv.LineVertical(plot_r,0,g_h,ColorToARGB(InpGrid,255));
 
    //--- bars
-   const int body=(int)MathMax(1,MathRound(g_step)-3);
-   const int half_w=body/2;
+   const int lw    =(g_step>=14.0 ? 2 : 1);                    // stroke width
+   const int tick_w=(int)MathMax(1.0,MathRound(g_step*0.5)-1.0); // open/close nub
+   const int half_w=(int)MathMax(1.0,MathRound(g_step)-3.0)/2;   // candle body
 
    for(int i=first;i<=last;i++)
      {
@@ -426,14 +472,29 @@ void Render(void)
 
       const uint arg=ColorToARGB(b.close>=b.open?InpBull:InpBear,255);
 
-      g_cv.LineVertical(cx,yh,yl,arg);
+      if(g_style==RC_BARS)
+        {
+         //--- high-low stem, open nub to the left, close nub to the right
+         VLine(cx,yh,yl,lw,arg);
+         HLine(cx-tick_w,cx,yo,lw,arg);
+         HLine(cx,cx+tick_w+1,yc,lw,arg);
 
-      int y1=MathMin(yo,yc), y2=MathMax(yo,yc);
-      if(y2-y1<1) y2=y1+1;
-      if(half_w>0) g_cv.FillRectangle(cx-half_w,y1,cx+half_w,y2,arg);
+         if(forming)
+            g_cv.Rectangle(cx-tick_w-2,yh-2,cx+tick_w+3,yl+2,
+                           ColorToARGB(clrWhite,255));
+        }
+      else
+        {
+         g_cv.LineVertical(cx,yh,yl,arg);
 
-      if(forming)
-         g_cv.Rectangle(cx-half_w-1,y1-1,cx+half_w+1,y2+1,ColorToARGB(clrWhite,255));
+         int y1=MathMin(yo,yc), y2=MathMax(yo,yc);
+         if(y2-y1<1) y2=y1+1;
+         if(half_w>0) g_cv.FillRectangle(cx-half_w,y1,cx+half_w,y2,arg);
+
+         if(forming)
+            g_cv.Rectangle(cx-half_w-1,y1-1,cx+half_w+1,y2+1,
+                           ColorToARGB(clrWhite,255));
+        }
      }
 
    //--- forming bar: close level and both completion targets
@@ -582,6 +643,7 @@ int OnInit(void)
   {
    g_range_ticks=(InpRange>0?InpRange:100);
    g_step       =(InpBarStep>1?(double)InpBarStep:8.0);
+   g_style      =InpStyle;
 
    ChartSetInteger(0,CHART_EVENT_MOUSE_WHEEL,true);
    ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,true);
@@ -604,6 +666,7 @@ void OnDeinit(const int reason)
    ObjectDelete(0,EDIT_NAME);
    ObjectDelete(0,BTN_NAME);
    ObjectDelete(0,BTN_HOME);
+   ObjectDelete(0,BTN_STYLE);
    ObjectDelete(0,CANVAS_NAME);
    ChartSetInteger(0,CHART_MOUSE_SCROLL,true);
    ChartRedraw();
@@ -670,6 +733,13 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
            {
             ObjectSetInteger(0,BTN_HOME,OBJPROP_STATE,false);
             ResetView();
+            Repaint();
+           }
+         else if(sparam==BTN_STYLE)
+           {
+            ObjectSetInteger(0,BTN_STYLE,OBJPROP_STATE,false);
+            g_style=(g_style==RC_BARS?RC_CANDLES:RC_BARS);
+            ObjectSetString(0,BTN_STYLE,OBJPROP_TEXT,g_style==RC_BARS?"Bars":"Candles");
             Repaint();
            }
          return;

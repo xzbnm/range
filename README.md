@@ -42,6 +42,16 @@ back to M1 bars with a direction-based path guess
 (`bullish -> O L H C`, `bearish -> O H L C`). After seeding, it stays live off
 `CopyTicksRange`, so no ticks are dropped between `OnCalculate` calls.
 
+## Chart style
+
+Range charts on TradingView are drawn as OHLC bars, so that is the default
+here: a high-low stem with the open as a nub on the left and the close as a
+nub on the right. The `Bars`/`Candles` button in the panel switches rendering
+live, and `Chart style` sets which one it starts on.
+
+Since a range bar always closes on one of its two edges, the close nub sits at
+the top or the bottom of the stem, never in between.
+
 ## Panel & controls
 
 Navigation follows TradingView: the wheel zooms, dragging pans.
@@ -49,6 +59,7 @@ Navigation follows TradingView: the wheel zooms, dragging pans.
 | Input | Action |
 |---|---|
 | Range box + Apply | rebuild at a new range size (`Enter` also applies) |
+| Bars / Candles | switch how each bar is drawn |
 | wheel | zoom horizontally, anchored on the bar under the cursor |
 | shift + wheel | pan horizontally |
 | ctrl + wheel | zoom the price scale |
