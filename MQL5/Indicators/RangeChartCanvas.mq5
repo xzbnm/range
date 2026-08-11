@@ -21,6 +21,7 @@ enum ENUM_RC_STYLE
 input ENUM_RC_STYLE InpStyle = RC_BARS;           // Chart style
 input int    InpRange     = 100;                  // Range (ticks)
 input int    InpBarStep   = 8;                    // Bar spacing (px)
+input int    InpRightShift= 10;                   // Right shift (bars of empty space)
 input bool   InpUseTicks  = true;                 // Seed from real ticks (else M1)
 input color  InpBull      = C'38,166,154';        // Bullish
 input color  InpBear      = C'239,83,80';         // Bearish
@@ -62,6 +63,7 @@ CRangeAggregator g_agg;
 int      g_range_ticks = 100;
 ENUM_RC_STYLE g_style  = RC_BARS;
 double   g_step        = 8.0;     // px per bar, fractional so zoom is smooth
+double   g_shift_bars  = 10.0;    // empty space kept to the right of the last bar
 int      g_scroll      = 0;       // bars hidden past the right edge
 double   g_tick_size   = 0.0;
 ulong    g_last_msc    = 0;
@@ -96,6 +98,10 @@ int   PlotB(void) { return(g_h-PLOT_BOT); }
 int   PlotH(void) { return(PlotB()-PlotT()); }
 int   BarCount(void) { return(g_agg.Total()+(g_agg.HasCurrent()?1:0)); }
 
+//--- centre x of the rightmost visible bar; everything else hangs off this,
+//--- so the shift, the crosshair and the zoom anchor cannot drift apart
+double AnchorX(void) { return(PlotR()-2-g_shift_bars*g_step-g_step*0.5); }
+
 //+------------------------------------------------------------------+
 datetime StartOfWeek(const datetime now)
   {
@@ -111,12 +117,22 @@ void ClampView(void)
    if(g_step<1.0)  g_step=1.0;
    if(g_step>60.0) g_step=60.0;
 
-   const int total=BarCount();
-   if(g_scroll<0)       g_scroll=0;
-   if(g_scroll>total-1) g_scroll=(total>0?total-1:0);
-
    if(g_pzoom<0.15) g_pzoom=0.15;
    if(g_pzoom>25.0) g_pzoom=25.0;
+
+   if(g_shift_bars<0.0)  g_shift_bars=0.0;
+   if(g_shift_bars>80.0) g_shift_bars=80.0;
+
+   //--- the shift and any drag past the right edge share one budget, so the
+   //--- last bar can never be pushed off the left of the plot
+   const double max_off=MathMax(0.0,(PlotR()-40.0)/MathMax(g_step,1.0));
+   if(g_shift_bars>max_off)
+      g_shift_bars=max_off;
+
+   const int total=BarCount();
+   const int extra=(int)(max_off-g_shift_bars);
+   if(g_scroll<-extra)  g_scroll=-extra;
+   if(g_scroll>total-1) g_scroll=(total>0?total-1:0);
   }
 
 //+------------------------------------------------------------------+
@@ -124,9 +140,9 @@ void ClampView(void)
 //+------------------------------------------------------------------+
 int BarAtX(const int x)
   {
-   const double k=(PlotR()-2-x)/g_step;          // bars left of the right edge
+   const double k=(AnchorX()-x)/g_step;          // bars left of the last one
    const int    last=BarCount()-1-g_scroll;
-   return(last-(int)MathFloor(k));
+   return(last-(int)MathRound(k));
   }
 
 //+------------------------------------------------------------------+
@@ -210,7 +226,7 @@ void CreatePanelObjects(void)
 //+------------------------------------------------------------------+
 void SyncHomeButton(void)
   {
-   const bool show=(g_scroll>0 || !g_auto_scale);
+   const bool show=(g_scroll!=0 || !g_auto_scale);
    ObjectSetInteger(0,BTN_HOME,OBJPROP_TIMEFRAMES,show?OBJ_ALL_PERIODS:OBJ_NO_PERIODS);
   }
 
@@ -403,16 +419,19 @@ void Render(void)
       return;
      }
 
-   int nvis=(int)MathCeil((plot_r-4)/g_step);
+   int nvis=(int)MathCeil(AnchorX()/g_step)+2;    // enough to reach the left edge
    if(nvis<1) nvis=1;
 
-   const int last  = total-1-g_scroll;
-   int       first = last-nvis+1;
+   //--- last is a slot index and may sit past the newest bar when the view is
+   //--- dragged beyond the right edge; last_real is what actually has data
+   const int last      = total-1-g_scroll;
+   const int last_real = MathMin(last,total-1);
+   int       first     = last-nvis+1;
    if(first<0) first=0;
 
    //--- fitted price extent
    double lo=DBL_MAX, hi=-DBL_MAX;
-   for(int i=first;i<=last;i++)
+   for(int i=first;i<=last_real;i++)
      {
       SRangeBar b;
       if(i<done) { if(!g_agg.Get(i,b)) continue; }
@@ -455,14 +474,14 @@ void Render(void)
    const int tick_w=(int)MathMax(1.0,MathRound(g_step*0.5)-1.0); // open/close nub
    const int half_w=(int)MathMax(1.0,MathRound(g_step)-3.0)/2;   // candle body
 
-   for(int i=first;i<=last;i++)
+   for(int i=first;i<=last_real;i++)
      {
       SRangeBar b;
       const bool forming=(i>=done);
       if(forming) b=cur;
       else if(!g_agg.Get(i,b)) continue;
 
-      const int cx=plot_r-2-(int)MathRound((last-i)*g_step+g_step*0.5);
+      const int cx=(int)MathRound(AnchorX()-(last-i)*g_step);
       if(cx<0 || cx>plot_r) continue;
 
       const int yh=plot_t+(int)((hi-b.high )/span*plot_h);
@@ -498,7 +517,7 @@ void Render(void)
      }
 
    //--- forming bar: close level and both completion targets
-   if(has_cur && g_scroll==0)
+   if(has_cur && g_scroll<=0)
      {
       double up,dn;
       g_agg.PendingLevels(up,dn);
@@ -542,8 +561,8 @@ void Render(void)
 
    if(!hb_ok)                                        // fall back to the rightmost bar
      {
-      if(last>=done && has_cur) { hb=cur; hb_ok=true; }
-      else if(last>=0)          { hb_ok=g_agg.Get(last,hb); }
+      if(last_real>=done && has_cur) { hb=cur; hb_ok=true; }
+      else if(last_real>=0)          { hb_ok=g_agg.Get(last_real,hb); }
      }
 
    //--- header, TradingView style
@@ -620,6 +639,7 @@ void ResetView(void)
    g_auto_scale=true;
    g_pzoom=1.0;
    g_pshift=0.0;
+   g_shift_bars=(InpRightShift>=0?(double)InpRightShift:10.0);
   }
 
 //+------------------------------------------------------------------+
@@ -627,13 +647,13 @@ void ResetView(void)
 //+------------------------------------------------------------------+
 void ZoomAt(const int px,const double factor)
   {
-   const int    x  = (px>=0 && px<PlotR()) ? px : PlotR()-2;
-   const double k0 = (PlotR()-2-x)/g_step;
+   const int    x  = (px>=0 && px<PlotR()) ? px : (int)AnchorX();
+   const double k0 = (AnchorX()-x)/g_step;
 
    g_step*=factor;
    ClampView();
 
-   const double k1=(PlotR()-2-x)/g_step;
+   const double k1=(AnchorX()-x)/g_step;
    g_scroll+=(int)MathRound(k0-k1);
    ClampView();
   }
@@ -643,6 +663,7 @@ int OnInit(void)
   {
    g_range_ticks=(InpRange>0?InpRange:100);
    g_step       =(InpBarStep>1?(double)InpBarStep:8.0);
+   g_shift_bars =(InpRightShift>=0?(double)InpRightShift:10.0);
    g_style      =InpStyle;
 
    ChartSetInteger(0,CHART_EVENT_MOUSE_WHEEL,true);

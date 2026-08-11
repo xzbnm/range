@@ -63,10 +63,16 @@ Navigation follows TradingView: the wheel zooms, dragging pans.
 | wheel | zoom horizontally, anchored on the bar under the cursor |
 | shift + wheel | pan horizontally |
 | ctrl + wheel | zoom the price scale |
-| drag on the chart | pan; vertical movement switches the price scale to manual |
+| drag on the chart | pan; dragging past the newest bar widens the right shift |
+| drag vertically on the chart | switches the price scale to manual |
 | drag on the price axis | stretch or compress the price scale |
 | `>\|` button, bottom right | back to the live edge and auto scale |
 | arrows / Home / End | pan, jump to oldest, jump to live |
+
+`Right shift` sets how much empty space is kept between the newest bar and
+the price axis, the same idea as MT5's chart shift, measured in bars so it
+holds its proportions through zoom. Dragging the chart past the newest bar
+widens it further; `>|` or `End` restores the configured value.
 
 A crosshair follows the cursor with a price tag on the axis and a time tag
 under the chart, and the header switches to the OHLC of whichever bar is
