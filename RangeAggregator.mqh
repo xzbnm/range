@@ -65,9 +65,6 @@ public:
 
    bool              Get(const int i,SRangeBar &out) const;
    bool              Current(SRangeBar &out) const;
-
-   // price levels at which the forming bar would complete
-   bool              PendingLevels(double &up,double &dn) const;
   };
 
 //+------------------------------------------------------------------+
@@ -223,19 +220,6 @@ bool CRangeAggregator::Current(SRangeBar &out) const
       return(false);
 
    out=m_cur;
-   return(true);
-  }
-
-//+------------------------------------------------------------------+
-//| Where the forming bar will close if price keeps going up / down. |
-//+------------------------------------------------------------------+
-bool CRangeAggregator::PendingLevels(double &up,double &dn) const
-  {
-   if(!m_active)
-      return(false);
-
-   up = Q(m_cur.low +m_range);
-   dn = Q(m_cur.high-m_range);
    return(true);
   }
 //+------------------------------------------------------------------+

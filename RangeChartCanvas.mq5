@@ -8,7 +8,7 @@
 #property indicator_plots 0
 
 #include <Canvas\Canvas.mqh>
-#include <RangeChart\RangeAggregator.mqh>
+#include "RangeAggregator.mqh"     // sits next to this file, no Include subfolder
 
 //--- chart style, matching TradingView's two range-chart renderings
 enum ENUM_RC_STYLE
@@ -516,17 +516,9 @@ void Render(void)
         }
      }
 
-   //--- forming bar: close level and both completion targets
+   //--- forming bar: current close level
    if(has_cur && g_scroll<=0)
      {
-      double up,dn;
-      g_agg.PendingLevels(up,dn);
-
-      const int yu=plot_t+(int)((hi-up)/span*plot_h);
-      const int yd=plot_t+(int)((hi-dn)/span*plot_h);
-      if(yu>plot_t && yu<plot_b) DashH(0,plot_r,yu,ColorToARGB(InpBull,255),5,6);
-      if(yd>plot_t && yd<plot_b) DashH(0,plot_r,yd,ColorToARGB(InpBear,255),5,6);
-
       const int yc=plot_t+(int)((hi-cur.close)/span*plot_h);
       if(yc>plot_t && yc<plot_b)
         {

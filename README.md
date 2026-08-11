@@ -5,13 +5,15 @@ top-left panel for the range size.
 
 ## Install
 
-Copy into your terminal's data folder (`File > Open Data Folder`):
+Copy both files into `MQL5/Indicators/` in your terminal's data folder
+(`File > Open Data Folder`):
 
 ```
-MQL5/Include/RangeChart/RangeAggregator.mqh
-MQL5/Indicators/RangeChartCanvas.mq5
+RangeChartCanvas.mq5     the indicator
+RangeAggregator.mqh      the engine, included from the file next to it
 ```
 
+They live in the same folder, so there is nothing to put under `Include/`.
 Compile `RangeChartCanvas.mq5` in MetaEditor, then drop it on an XAUUSD chart.
 
 ## The rules it implements
@@ -32,7 +34,7 @@ bar N     O 4403.15   H 4403.55   L 4402.55   C 4403.55
 ```
 
 `4403.15` is not fed to the engine - it is derived by rule 4 from the previous
-close of `4403.16`. Run `python3 tools/verify_engine.py` to check both bars.
+close of `4403.16`. Run `python3 verify_engine.py` to check both bars.
 
 ## Data
 
@@ -78,9 +80,8 @@ A crosshair follows the cursor with a price tag on the axis and a time tag
 under the chart, and the header switches to the OHLC of whichever bar is
 hovered.
 
-The forming bar is drawn live, outlined in white, with its two completion
-targets marked: the teal dashes are `low + R` (where it closes as an up bar),
-the red dashes are `high - R` (down bar).
+The forming bar is drawn live, outlined in white, with a dashed line and a
+price tag at its current close.
 
 MT5's own mouse scrolling is turned off while the indicator is attached, so the
 chart underneath cannot drift out from under the canvas. It is restored on
