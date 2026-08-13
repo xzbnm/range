@@ -1,3 +1,6 @@
+#ifndef RC_RANGE_DRAWINGS_MQH
+#define RC_RANGE_DRAWINGS_MQH
+
 //+------------------------------------------------------------------+
 //|                                                RangeDrawings.mqh |
 //|         Drawing tools, toolbar and editing for the range chart   |
@@ -742,3 +745,4 @@ void TbRender(CCanvas *cv,const int tbx,const int tby,const int active,
      }
   }
 //+------------------------------------------------------------------+
+#endif // RC_RANGE_DRAWINGS_MQH

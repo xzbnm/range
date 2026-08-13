@@ -1,17 +1,20 @@
 # Range Chart for MetaTrader 5
 
 TradingView-style range bars for MT5, rendered on a `CCanvas` overlay with a
-top-left panel for the range size.
+top-left panel for the range size, plus the **Hook Sharp v7.1** signal
+indicator ported from Pine Script and running on those range bars.
 
 ## Install
 
-Copy all three files into `MQL5/Indicators/` in your terminal's data folder
+Copy all five files into `MQL5/Indicators/` in your terminal's data folder
 (`File > Open Data Folder`):
 
 ```
 RangeChartCanvas.mq5     the indicator
 RangeAggregator.mqh      the range bar engine
 RangeDrawings.mqh        drawing tools, toolbar and editing
+RangeStrategy.mqh        the Hook Sharp v7.1 signal logic
+RangeDashboard.mqh       trade overlays and the performance panel
 ```
 
 They live in the same folder, so there is nothing to put under `Include/`.
@@ -134,3 +137,95 @@ to their bars through scroll, zoom and price scaling.
 Drawings are written to `MQL5/Files/RC_<symbol>_<range>.csv` on every change
 and reloaded on attach. Each range size keeps its own file, because changing
 the range renumbers the bars the anchors point at.
+
+## Hook Sharp v7.1
+
+The TradingView indicator is ported in `RangeStrategy.mqh` and drives a
+paper-trading account: it finds hooks, places pending orders, turns them into
+positions, manages stop and target, and keeps the running statistics.
+
+### What it runs on
+
+Pine executes once per confirmed chart bar. Here the chart bar is a **completed
+range bar**, so the strategy is stepped once for every bar the aggregator
+appends, oldest first. The forming bar is never evaluated, which is the MQL
+equivalent of `barstate.isconfirmed` and means the result cannot repaint.
+
+`bar_index` maps to the aggregator's bar index and `high[n]` to that bar's
+high, so every index in the Pine source carries over unchanged. During the
+rebuild the whole week of range bars is replayed in one pass, exactly as
+TradingView replays history, and after that each new bar is stepped as it
+closes.
+
+### What it draws
+
+Every pending order and open position gets the box, entry, stop and target the
+Pine version draws, and a finished trade leaves its `TP n` / `SL n` / `RF n`
+tag behind. Anchors are (bar index, price), so the overlays stay welded to
+their bars through scroll, zoom and price scaling. A live position has a solid
+entry line, a pending order a dashed one.
+
+The stats table becomes a canvas panel at the top right, carrying the same
+rows: capital, net P/L, return, max drawdown, win rate, profit factor, R:R,
+trade counts, and the suggested spread. Two rows are new - average trade
+duration and open/pending count - plus a footer with the last signal that
+`sendSignal()` emitted. `D` toggles the panel.
+
+### Inputs
+
+Grouped under `Hook strategy`, `Hook / detection`, `Hook / money management`
+and `Hook / window and timing`. Each one maps to the Pine input of the same
+meaning and keeps its default, so an untouched load reproduces the Pine
+defaults: range hooks up to $100, 10% minimum pullback, 15 bars maximum, 10%
+risk on $100 of capital at 1:2, 10 minutes between trades, one trade at a
+time, dynamic start at 01:30.
+
+Three inputs behave differently from Pine, because the platform leaves no
+choice:
+
+| Input | Difference |
+|---|---|
+| `Day timezone shift from broker time` | Pine takes an IANA zone name; MQL has no timezone database, so the day start is expressed as an offset in minutes from broker time. `0` means the day-start hour is read in broker time. |
+| `Min hook bars` | Declared by the Pine source but never used by its logic. Kept for parity, wired to nothing. |
+| `Dashboard labels in Persian` | Off by default. `CCanvas` renders text without complex-script shaping, so Persian letters come out unjoined on most terminals. |
+
+`Start at bar` only applies when dynamic start is off, and like Pine it is
+measured against the newest bar, so during the historical replay it selects
+the last N bars and in real time it is always satisfied.
+
+### Faithfulness
+
+The port keeps the quirks of the original rather than tidying them, because
+tidying them would change which trades are taken:
+
+* Pine's `for i = a to b` counts **downwards** when `b < a`. With the default
+  look-back of 0, `f_are_prev_lows_higher` therefore still tests the bar before
+  the start. The port reproduces the direction, not the intent.
+* `f_are_prev_lows_higher` and `f_are_prev_highs_lower` are not mirror images -
+  only the sell side is guarded by `len > 0`.
+* The buy and sell branches of `f_manage_order_*_normal` differ: the buy side
+  has no `else` on the hook-size test, so a hook that fails only that test
+  survives to the next bar, and the second confirmation path uses `> 1` on the
+  buy side against `> 2` on the sell side.
+* `f_find_start_index_right_sharp_sell` checks lowest before highest, the
+  reverse of the buy version.
+* `f_clear_other_pending_orders` identifies hooks by `priceEnd`.
+
+A warm-up guard skips the first `max(40, max hook bars + 2)` bars, standing in
+for the `na` history Pine propagates before enough bars exist.
+
+### Checking the port
+
+```
+python3 verify_engine.py      # range bar rules against live TradingView bars
+python3 verify_strategy.py    # the hook logic, as a reference mirror
+```
+
+`verify_strategy.py` is a transliteration of `RangeStrategy.mqh`. It replays a
+synthetic tick path through the same bar rules, steps the hook logic over the
+result, and asserts the invariants that have to hold if the control flow and
+the arithmetic are right: equity equals capital plus the sum of closed P/L,
+the TP/SL/RF counts match the result tags, a TP pays `risk x R:R - spread` and
+an SL costs `risk + spread`, risk is the configured share of equity at entry,
+no trade closes before it opens, and with concurrent trades off no two
+positions ever overlap.

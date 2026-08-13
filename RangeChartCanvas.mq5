@@ -10,6 +10,8 @@
 #include <Canvas\Canvas.mqh>
 #include "RangeAggregator.mqh"     // sit next to this file, no Include subfolder
 #include "RangeDrawings.mqh"
+#include "RangeStrategy.mqh"
+#include "RangeDashboard.mqh"
 
 //--- chart style, matching TradingView's two range-chart renderings
 enum ENUM_RC_STYLE
@@ -29,6 +31,43 @@ input color  InpBear      = C'239,83,80';         // Bearish
 input color  InpBg        = C'19,23,34';          // Background
 input color  InpGrid      = C'42,46,57';          // Grid
 input color  InpText      = C'209,212,220';       // Text
+
+//--- Hook Sharp v7.1, ported from the TradingView indicator. Every input
+//--- below maps one-to-one onto the Pine input of the same meaning.
+input group "Hook strategy"
+input bool   InpHookOn        = true;   // Run the hook strategy
+input bool   InpHookDraw      = true;   // Draw entries, stops and targets
+input bool   InpHookDash      = true;   // Show the performance dashboard
+input bool   InpHookDashFa    = false;  // Dashboard labels in Persian
+
+input group "Hook / detection"
+input double InpMaxDollarHook = 100.0;  // Max hook size ($)
+input double InpMinPullback   = 10.0;   // Min hook pullback (%)
+input int    InpMinHookBars   = 5;      // Min hook bars (unused by the Pine logic)
+input int    InpMaxHookBars   = 15;     // Max hook bars
+input int    InpLookBackLen   = 0;      // Look-back bars (reverse)
+input int    InpMinSizeSharp  = 1;      // Min sharp bars
+input bool   InpJustNode1     = true;   // Node 1 only
+
+input group "Hook / money management"
+input double InpInitialCapital= 100.0;  // Initial capital ($)
+input double InpRiskPercent   = 10.0;   // Risk per trade (%)
+input double InpRiskReward    = 2.0;    // Risk : reward
+input double InpSpread        = 2.0;    // Spread ($)
+input bool   InpEnableSlReduce= false;  // Shrink SL/TP distance
+input double InpSlReducePct   = 20.0;   // Shrink by (%)
+input bool   InpEnableRiskFree= false;  // Enable risk-free (break-even)
+input double InpRiskFreeTrig  = 1.0;    // Risk-free trigger (R)
+
+input group "Hook / window and timing"
+input bool   InpDynamicStart  = true;   // Start at the beginning of the day
+input int    InpDayStartHour  = 1;      // Day start hour
+input int    InpDayStartMin   = 30;     // Day start minute
+input int    InpDayTzShiftMin = 0;      // Day timezone shift from broker time (min)
+input int    InpStartMainBar  = 4990;   // Start at bar (when dynamic start is off)
+input int    InpEndMainBar    = 0;      // Stop N bars before the newest
+input int    InpMinMinutes    = 10;     // Min minutes between trades
+input bool   InpAllowMulti    = false;  // Allow concurrent trades
 
 //--- object names
 #define CANVAS_NAME  "RCV_canvas"
@@ -58,10 +97,13 @@ input color  InpText      = C'209,212,220';       // Text
 #define VK_UP        38
 #define VK_RIGHT     39
 #define VK_DOWN      40
+#define VK_D         68
 
 //--- state
 CCanvas          g_cv;
 CRangeAggregator g_agg;
+CHookStrategy    g_strat;
+bool             g_show_dash = true;
 
 int      g_range_ticks = 100;
 ENUM_RC_STYLE g_style  = RC_BARS;
@@ -273,6 +315,44 @@ bool BuildCanvas(void)
   }
 
 //+------------------------------------------------------------------+
+//| Copies the inputs into the strategy. Called before every rebuild  |
+//| so a re-attach with new settings takes effect immediately.        |
+//+------------------------------------------------------------------+
+void ConfigureStrategy(void)
+  {
+   SHookSettings s;
+   HookSettingsDefaults(s);
+
+   s.max_dollar_hook      = InpMaxDollarHook;
+   s.max_pullback_hook    = InpMinPullback;
+   s.min_hook_bars        = InpMinHookBars;
+   s.max_hook_bars        = InpMaxHookBars;
+   s.look_back_len        = InpLookBackLen;
+   s.min_size_sharp       = InpMinSizeSharp;
+   s.just_node_1          = InpJustNode1;
+
+   s.initial_capital      = InpInitialCapital;
+   s.risk_percent         = InpRiskPercent;
+   s.risk_reward          = InpRiskReward;
+   s.spread               = InpSpread;
+   s.enable_sl_reduce     = InpEnableSlReduce;
+   s.sl_reduce_percent    = InpSlReducePct;
+   s.enable_risk_free     = InpEnableRiskFree;
+   s.risk_free_trigger    = InpRiskFreeTrig;
+
+   s.enable_dynamic_start = InpDynamicStart;
+   s.day_start_hour       = InpDayStartHour;
+   s.day_start_minute     = InpDayStartMin;
+   s.day_tz_shift_min     = InpDayTzShiftMin;
+   s.start_main_candle    = InpStartMainBar;
+   s.end_main_candle      = InpEndMainBar;
+   s.min_minutes          = InpMinMinutes;
+   s.allow_multi_trade    = InpAllowMulti;
+
+   g_strat.Configure(s);
+  }
+
+//+------------------------------------------------------------------+
 void Rebuild(void)
   {
    const uint t0=GetTickCount();
@@ -330,9 +410,20 @@ void Rebuild(void)
    g_draw.Load();
    g_sel=-1;
 
-   g_status=StringFormat("%s  R=%d (%.*f)  bars=%d  src=%s  %dms",
+   //--- replay the whole history through the strategy in one pass
+   string hook="off";
+   if(InpHookOn)
+     {
+      ConfigureStrategy();
+      g_strat.Reset();
+      g_strat.ProcessNew();
+      hook=StringFormat("trades=%d",
+                        g_strat.CountTP()+g_strat.CountSL()+g_strat.CountRF());
+     }
+
+   g_status=StringFormat("%s  R=%d (%.*f)  bars=%d  src=%s  hook %s  %dms",
                          _Symbol,g_range_ticks,_Digits,g_range_ticks*g_tick_size,
-                         g_agg.Total(),src,(int)(GetTickCount()-t0));
+                         g_agg.Total(),src,hook,(int)(GetTickCount()-t0));
    g_dirty=true;
   }
 
@@ -568,6 +659,10 @@ void Render(void)
    g_view.anchor_x = AnchorX();
    g_view.last_slot= last;
 
+   //--- strategy overlays go under the user's drawings
+   if(InpHookOn && InpHookDraw)
+      HkRenderAll(GetPointer(g_cv),g_view,GetPointer(g_strat),_Digits,InpBg,InpText);
+
    g_draw.RenderAll(g_view,g_sel,_Digits);
 
    if(g_hover>=0 && g_hover!=g_sel)                // handles hint that it is grabbable
@@ -693,6 +788,14 @@ void Render(void)
    g_cv.TextOut(plot_r-150,g_h-16,
                 StringFormat("zoom %.1fpx  scale %s",g_step,hint),
                 ColorToARGB(C'120,123,134',255));
+
+   //--- dashboard last, so it sits above everything else
+   if(InpHookOn && g_show_dash)
+     {
+      const double lastc=(has_cur?cur.close:(hb_ok?hb.close:0.0));
+      DashRender(GetPointer(g_cv),g_view,GetPointer(g_strat),
+                 _Digits,g_tick_size,lastc,InpHookDashFa,InpText,InpGrid);
+     }
 
    g_cv.Update();
    g_last_paint=GetTickCount();
@@ -834,6 +937,9 @@ int OnInit(void)
       return(INIT_FAILED);
 
    g_draw.Attach(GetPointer(g_cv));
+   g_strat.Attach(GetPointer(g_agg));
+   g_show_dash=InpHookDash;
+
    CreatePanelObjects();
    Rebuild();
    Repaint();
@@ -867,6 +973,11 @@ int OnCalculate(const int rates_total,
                 const int &spread[])
   {
    PumpLive();
+
+   //--- every range bar that just closed is stepped through the strategy,
+   //--- in order, exactly once - the forming bar is never evaluated
+   if(InpHookOn && g_strat.ProcessNew())
+      g_dirty=true;
 
    if(g_dirty && GetTickCount()-g_last_paint>=25)     // cap live repaints at ~40fps
       Repaint();
@@ -1181,6 +1292,7 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
             case VK_DOWN:  g_auto_scale=false; g_pzoom/=1.15;                break;
             case VK_DELETE: DeleteSelected();                                break;
             case VK_ESCAPE: g_placing=false; g_sel=-1; g_tool=TOOL_CROSS;    break;
+            case VK_D:     g_show_dash=!g_show_dash;                         break;
             default: return;
            }
          Repaint();

@@ -1,3 +1,6 @@
+#ifndef RC_RANGE_AGGREGATOR_MQH
+#define RC_RANGE_AGGREGATOR_MQH
+
 //+------------------------------------------------------------------+
 //|                                              RangeAggregator.mqh |
 //|                          TradingView-compatible range bar engine |
@@ -223,3 +226,4 @@ bool CRangeAggregator::Current(SRangeBar &out) const
    return(true);
   }
 //+------------------------------------------------------------------+
+#endif // RC_RANGE_AGGREGATOR_MQH
