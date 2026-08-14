@@ -1,0 +1,1261 @@
+// @version=6
+
+indicator("هوک شارپ v7.1 signal ", overlay=true, max_boxes_count=499, max_labels_count=499, max_lines_count=499)
+
+// ══════════════════════════════════════════════════════════════════
+// SECTION 1 — INPUTS
+// ══════════════════════════════════════════════════════════════════
+var string G1 = "🔍 Detection Sett.ings"
+var string G2 = "📏 Hook Size Filters"
+var string G3 = "🎨 Display Settings"
+var string G4 = "🎨 Main Settings"
+var string G5 = "💰 Money Management"
+var string G6 = "⏱ Trade Timing"
+
+input_max_dollar_hook   = input.float(100,  "سقف هوک (دلاری)",            group=G1, minval=1.0)
+input_max_pullback_hook = input.float(10, "حداقل اصلاح هوک %",          group=G1, minval=1.0, step=1.0)
+input_min_hook_bars     = input.int  (5,    "کمترین تعداد کندل هوک",      group=G1, minval=2,   maxval=4000)
+input_max_hook_bars     = input.int  (15,   "بیشترین تعداد کندل هوک",     group=G1, minval=5,   maxval=4900)
+input_look_back_len     = input.int  (0,    "تعداد کندهای قبلی (برعکس) ", group=G1, minval=0,   maxval=3000)
+
+input_initial_capital   = input.float(100.0, "💵 سرمایه اولیه ($)",        group=G5, minval=100.0,  step=100.0)
+input_risk_percent      = input.float(10,   "⚖️ درصد ریسک هر معامله %",  group=G5, minval=0.1,   maxval=100.0, step=0.1)
+input_risk_reward       = input.float(2,   "🎯 نسبت ریسک به ریوارد (R:R)", group=G5, minval=0.1, maxval=10.0, step=0.1, tooltip="مثال: 2 یعنی حد سود دو برابر فاصله حد ضرر")
+input_spread            = input.float(2,   "📌 اسپرد ($)",               group=G5, minval=0.0,   step=0.01)
+input_enable_sl_reduce  = input.bool (false, "🔻 کاهش فاصله SL/TP",        group=G5)
+input_sl_reduce_percent = input.float(20.0,  "📉 درصد کاهش فاصله %",       group=G5, minval=0.0, maxval=99.0, step=1.0)
+
+// ── Risk-Free (Break-Even) ──
+input_enable_risk_free  = input.bool (false, "🛡 فعال‌سازی ریسک فری",       group=G5, tooltip="با فعال شدن، وقتی قیمت به اندازهٔ مشخصی در سود برود، حد ضرر روی نقطهٔ ورود (نقطهٔ سربه‌سر) منتقل می‌شود.")
+input_risk_free_trigger = input.float(1.0,   "🛡 سطح فعال‌سازی ریسک فری (R)", group=G5, minval=0.1, maxval=10.0, step=0.1, tooltip="بر مبنای R (واحد ریسک = فاصلهٔ ورود تا حد ضرر) کار می‌کند. مثال: 1 یعنی وقتی قیمت به اندازهٔ یک برابر فاصلهٔ حد ضرر در سود رفت، SL به نقطهٔ ورود منتقل می‌شود. این مقدار باید کمتر از R:R باشد تا قبل از TP فعال شود.")
+
+input_start_main_candle = input.int  (4990,  "شروع از کندل",               group=G4, minval=2,   maxval=4990)
+input_end_main_candle   = input.int  (0,     "تا کندل",                    group=G4, minval=0,   maxval=4989)
+
+// ── شروع داینامیک (از ابتدای روز جاری) ──
+input_enable_dynamic_start = input.bool(true, "🔄 شروع داینامیک از ابتدای روز", group=G4, tooltip="با فعال شدن، به‌جای عدد ثابت «شروع از کندل»، محاسبات از ابتدای روز معاملاتی جاری شروع می‌شود و در پایان فقط آمار همان روز نمایش داده می‌شود. مناسب کندل‌های رنج (زمان واقعی هر کندل مبنای شمارش است).")
+input_day_start_hour       = input.int (1,     "🕜 ساعت شروع روز",             group=G4, minval=0, maxval=23)
+input_day_start_minute     = input.int (30,    "🕜 دقیقه شروع روز",            group=G4, minval=0, maxval=59)
+input_day_tz               = input.string("Asia/Tehran", "🌐 منطقهٔ زمانی روز", group=G4, tooltip="باید با تایم‌زونِ چارت شما یکی باشد تا «ساعت شروع روز» دقیقاً همان لحظه‌ای باشد که روی چارت می‌بینید. برای تهران: Asia/Tehran. می‌توانید نام IANA دیگری مثل UTC یا America/New_York هم وارد کنید.")
+
+// ── Trade Timing ──
+input_min_minutes       = input.int  (10,    "⏱ حداقل فاصله بین معاملات (دقیقه)", group=G6, minval=0)
+input_allow_multi_trade = input.bool (false, "🔀 چند معامله همزمان",               group=G6)
+
+
+// ── Debug ──
+input_min_size_sharp    = input.int  (1,    "⏱حداقل تعداد کندل شارپ", group=G6, minval=0)
+input_just_node_1       = input.bool (true, "فقط نود 1",               group=G6)
+input_show_debug_sharp_right = input.bool  (false,    "Debug sharp right", group=G6)
+
+
+max_bars_back(high, 500)
+max_bars_back(low,  500)
+// ══════════════════════════════════════════════════════════════════
+// SECTION 2 — TYPES
+// ══════════════════════════════════════════════════════════════════
+type hook
+    bool   isSharpRightHook
+    int    indexStart
+    int    indexPeak
+    int    indexEnd
+    float  priceStart
+    float  pricePeak
+    float  priceEnd
+    string typeSignal
+    bool   isConfirmed
+    bool   isDrawn
+    box    rectangleBox
+    line   lineEntry
+    line   lineSL
+    line   lineTP
+    label  labelEntry
+    label  labelSL
+    label  labelTP
+    label  labelResult
+    bool   isOpen
+    bool   isOrder 
+    bool   isGetProfit
+    bool   isFinish
+    bool   isRiskFreeActive      // حد ضرر به نقطهٔ ورود منتقل شده
+    bool   isRiskFreeClosed      // معامله نهایتاً سربه‌سر (ریسک فری) بسته شد
+    float  priceStopLoss
+    float  priceTakeProfit
+    float  tradeCapitalAtEntry
+    float  tradeRiskAmount
+    float  tradePnl
+    int    tradeOpenTime        // زمان باز شدن معامله (timestamp)
+    int    tradeCloseTime       // زمان بسته شدن معامله (timestamp)
+    int    tradeDurationMinutes // مدت زمان معامله به دقیقه
+
+var array<hook> hooksList = array.new<hook>()
+
+
+type Signal
+    float priceEntry     
+    float priceStopLoss
+    float priceRemoveOrder
+    int timeOrder   
+
+Signal signal = Signal.new()
+// ══════════════════════════════════════════════════════════════════
+// SECTION 5.2 — Send Signal
+// ══════════════════════════════════════════════════════════════════
+sendSignal(isSignal ,typeOrder ,priceEntry ,priceStopLoss ,priceRemoveOrder ) =>
+
+    if isSignal
+
+        signal.priceEntry       := priceEntry
+        signal.priceStopLoss    := priceStopLoss
+        signal.priceRemoveOrder := priceRemoveOrder
+        signal.timeOrder        := time
+
+    else
+
+        signal.priceEntry       := 0
+        signal.priceStopLoss    := 0
+        signal.priceRemoveOrder := 0
+        signal.timeOrder        := 0
+
+
+// ══════════════════════════════════════════════════════════════════
+// SECTION 2.3 — EQUITY & TIMING TRACKER
+// ══════════════════════════════════════════════════════════════════
+var float equity          = input_initial_capital
+var float peakEquity      = input_initial_capital
+var float maxDrawdown     = 0.0
+var int   cntTP           = 0
+var int   cntSL           = 0
+var int   cntRF           = 0   // تعداد معاملات ریسک فری (سربه‌سر) شده
+var int   cntBuy          = 0
+var int   cntSell         = 0
+var float totalProfit     = 0.0
+var float totalLoss       = 0.0
+var float grossPnl        = 0.0
+var int   lastTradeOpenTime = 0  // timestamp آخرین معامله‌ای که باز شد
+var int   totalDurationMin  = 0  // جمع دقایق همه معاملات (برای میانگین)
+
+// ── چند دقیقه از آخرین معامله گذشته؟ ────────────────────────────
+f_minutes_since_last_trade() =>
+    int ms = time - lastTradeOpenTime          // میلی‌ثانیه
+    ms / 60000
+
+// 
+f_hook_draw_clean(hook h) =>
+    // if h.isDrawn
+    if not na(h.rectangleBox)
+        box.delete(h.rectangleBox)
+    if not na(h.lineEntry)
+        line.delete(h.lineEntry)
+    if not na(h.lineSL)
+        line.delete(h.lineSL)
+    if not na(h.lineTP)
+        line.delete(h.lineTP)
+    if not na(h.labelEntry)
+        label.delete(h.labelEntry)
+    if not na(h.labelSL)
+        label.delete(h.labelSL)
+    if not na(h.labelTP)
+        label.delete(h.labelTP)
+    if not na(h.labelResult)
+        label.delete(h.labelResult)
+    h.isDrawn      := false
+    h.rectangleBox := na
+    h.lineEntry    := na
+    h.lineSL       := na
+    h.lineTP       := na
+    h.labelEntry   := na
+    h.labelSL      := na
+    h.labelTP      := na
+    h.labelResult  := na
+    h
+
+//
+f_remove_hook(hook h) =>
+    sendSignal(false,'',0,0,0)
+    f_hook_draw_clean(h)
+    int idx = array.indexof(hooksList, h)
+    if idx >= 0
+        array.remove(hooksList, idx)
+
+// همهٔ اردرهای در انتظار را پاک می‌کند به‌جز هوکی که تازه پوزیشن شده
+f_clear_other_pending_orders(hook keepHook) =>
+    if not input_allow_multi_trade
+        // از انتها به ابتدا تا حذف، ایندکس‌های بعدی را خراب نکند
+        for i = array.size(hooksList) - 1 to 0
+            if i <= array.size(hooksList) - 1   // محافظ ایندکس
+                h = array.get(hooksList, i)
+                // فقط اردرهای در انتظار را حذف کن، نه پوزیشن باز/تمام‌شده
+                if h.priceEnd != keepHook.priceEnd and not h.isConfirmed and not h.isFinish
+                    f_remove_hook(h)
+// ── آیا مجاز به باز کردن معامله جدید هستیم؟ ─────────────────────
+f_can_open_new_trade(hook itemHook) =>
+    // شرط ۱: فاصله زمانی کافی گذشته
+    bool timeOk = lastTradeOpenTime == 0 or f_minutes_since_last_trade() >= input_min_minutes
+
+    // شرط ۲: اگر multi-trade خاموشه، نباید معامله باز داشته باشیم
+    bool slotOk = true
+    if not input_allow_multi_trade
+        for i = 0 to array.size(hooksList) - 1
+            h = array.get(hooksList, i)
+            if h.isConfirmed and not h.isFinish
+                slotOk := false
+                break
+        // for i = 0 to array.size(hooksList) - 1
+        //     h = array.get(hooksList, i)
+        //     if h.isOrder and not h.isFinish and itemHook.priceEnd != h.priceEnd
+        //         f_remove_hook(h)
+        //         break 
+
+    timeOk and slotOk
+//
+f_calc_risk(float entryPx, float slPx, float cap) =>
+    float slDist  = math.abs(entryPx - slPx) + input_spread
+    float riskAmt = cap * input_risk_percent / 100.0
+    [slDist, riskAmt]
+
+// ── SL جدید را بر اساس درصد کاهش فاصله محاسبه می‌کند ────────────
+// با کاهش فاصله SL تا entry، چون نسبت TP/SL بر اساس R:R تعیین می‌شود،
+// TP هم خودکار به همان نسبت نزدیک‌تر می‌شود.
+f_adjusted_sl(float entryPx, float rawSlPx) =>
+    float result = rawSlPx
+    if input_enable_sl_reduce and input_sl_reduce_percent > 0
+        float dist    = entryPx - rawSlPx                       // مثبت برای buy، منفی برای sell
+        float newDist = dist * (1.0 - input_sl_reduce_percent / 100.0)
+        result := entryPx - newDist
+    result
+
+// ══════════════════════════════════════════════════════════════════
+// SECTION 3 — DRAW HELPERS
+// ══════════════════════════════════════════════════════════════════
+f_draw_hook_lines(int abs_start, int abs_peak, int abs_end, int abs_zigzag) =>
+    // start → peak
+    line.new(x1 = abs_start, y1 = low[bar_index - abs_start],
+             x2 = abs_peak,  y2 = high[bar_index - abs_peak],
+             xloc = xloc.bar_index, color = color.green, width = 2)
+
+    // peak → end
+    line.new(x1 = abs_peak, y1 = high[bar_index - abs_peak],
+             x2 = abs_end,  y2 = low[bar_index - abs_end],
+             xloc = xloc.bar_index, color = color.red, width = 2)
+
+    // zigzag → peak
+    line.new(x1 = abs_zigzag, y1 = high[bar_index - abs_zigzag],
+             x2 = abs_peak,   y2 = high[bar_index - abs_peak],
+             xloc = xloc.bar_index, color = color.blue, width = 2)
+f_draw_hook_lines_sell(int abs_start, int abs_peak, int abs_end, int abs_zigzag) =>
+    // start → peak
+    line.new(x1 = abs_start, y1 = high[bar_index - abs_start],
+             x2 = abs_peak,  y2 = low[bar_index - abs_peak],
+             xloc = xloc.bar_index, color = color.green, width = 2)
+
+    // peak → end
+    line.new(x1 = abs_peak, y1 = low[bar_index - abs_peak],
+             x2 = abs_end,  y2 = high[bar_index - abs_end],
+             xloc = xloc.bar_index, color = color.red, width = 2)
+
+    // zigzag → peak
+    line.new(x1 = abs_zigzag, y1 = low[bar_index - abs_zigzag],
+             x2 = abs_peak,   y2 = low[bar_index - abs_peak],
+             xloc = xloc.bar_index, color = color.blue, width = 2)
+f_draw_idx_label(int abs_bar, string txt, color col, bool below) =>
+    int off = bar_index - abs_bar          // تبدیل bar number به offset
+    float y = off >= 0 and off < bar_index ? low[off] : low
+    label.new(x = abs_bar, y = y, text = txt, xloc = xloc.bar_index,
+              yloc = below ? yloc.belowbar : yloc.abovebar,
+              style = below ? label.style_label_up : label.style_label_down,
+              color = col, textcolor = color.white, size = size.small)
+f_draw_position_buy(hook h) =>
+    if  h.indexEnd != -1
+        int   entryIdx = h.indexPeak
+        float entryPx  = h.pricePeak
+        float slPx     = h.priceStopLoss
+        float tpPx     = h.priceTakeProfit
+        int   extRight = h.indexPeak + 30
+
+        h.rectangleBox := box.new(
+             left=entryIdx, top=entryPx, right=extRight, bottom=slPx,
+             border_color=color.new(color.red, 60),
+             bgcolor=color.new(color.red, 88),
+             border_width=1, extend=extend.none)
+
+        h.lineEntry := line.new(x1=entryIdx, y1=entryPx, x2=extRight, y2=entryPx,
+             color=color.new(color.white, 0), style=line.style_solid, width=2)
+        h.lineSL    := line.new(x1=entryIdx, y1=slPx, x2=extRight, y2=slPx,
+             color=color.new(color.red, 0), style=line.style_dashed, width=1)
+        h.lineTP    := line.new(x1=entryIdx, y1=tpPx, x2=extRight, y2=tpPx,
+             color=color.new(color.lime, 0), style=line.style_dashed, width=1)
+        h.isDrawn := true
+    h
+
+f_draw_position_sell(hook h) =>
+    if h.indexEnd != -1
+        int   entryIdx = h.indexPeak
+        float entryPx  = h.pricePeak
+        float slPx     = h.priceStopLoss
+        float tpPx     = h.priceTakeProfit
+        int   extRight = h.indexPeak + 30
+
+        h.rectangleBox := box.new(
+             left=entryIdx, top=slPx, right=extRight, bottom=entryPx,
+             border_color=color.new(color.red, 60),
+             bgcolor=color.new(color.red, 88),
+             border_width=1, extend=extend.none)
+
+        h.lineEntry := line.new(x1=entryIdx, y1=entryPx, x2=extRight, y2=entryPx,
+             color=color.new(color.white, 0), style=line.style_solid, width=2)
+        h.lineSL    := line.new(x1=entryIdx, y1=slPx, x2=extRight, y2=slPx,
+             color=color.new(color.red, 0), style=line.style_dashed, width=1)
+        h.lineTP    := line.new(x1=entryIdx, y1=tpPx, x2=extRight, y2=tpPx,
+             color=color.new(color.lime, 0), style=line.style_dashed, width=1)
+        h.isDrawn := true
+    h
+
+// ── متن سادهٔ نتیجهٔ معامله: فقط متن، بدون بک‌گراند و بدون باکس لیبل ──
+f_draw_result(hook h, int tpNum, int slNum, int rfNum) =>
+    if h.isFinish and na(h.labelResult)
+        bool   isBuy = h.typeSignal == "buy"
+
+        string resultTxt = ""
+        color  txtClr    = color.white
+        if h.isRiskFreeClosed
+            resultTxt := "RF " + str.tostring(rfNum)
+            txtClr    := color.new(color.aqua, 0)
+        else if h.isGetProfit
+            resultTxt := "TP " + str.tostring(tpNum)
+            txtClr    := color.new(color.lime, 0)
+        else
+            resultTxt := "SL " + str.tostring(slNum)
+            txtClr    := color.new(color.red, 0)
+
+        float labelY = isBuy
+             ? h.priceTakeProfit + ta.tr * 1.5
+             : h.priceTakeProfit - ta.tr * 1.5
+
+        // style_none → فقط متن نمایش داده می‌شود؛ color کاملاً شفاف تا هیچ بک‌گراندی دیده نشود
+        h.labelResult := label.new(
+             x=h.indexPeak, y=labelY, text=resultTxt,
+             color=color.new(color.white, 100),
+             textcolor=txtClr,
+             style=label.style_none,
+             size=size.normal)
+    h
+
+// ══════════════════════════════════════════════════════════════════
+// SECTION 4 — HOOK METHODS
+// ══════════════════════════════════════════════════════════════════
+f_hook_new(int idxStart, int idxPeak, int idxEnd,
+           float priceStart, float pricePeak, float priceEnd,
+           string typeSignal) =>
+    hook h                = hook.new()
+    h.isSharpRightHook    := false
+    h.indexStart          := idxStart
+    h.indexPeak           := idxPeak
+    h.indexEnd            := idxEnd
+    h.priceStart          := priceStart
+    h.pricePeak           := pricePeak
+    h.priceEnd            := priceEnd
+    h.typeSignal          := typeSignal
+    h.isConfirmed         := false
+    h.isDrawn             := false
+    h.rectangleBox        := na
+    h.lineEntry           := na
+    h.lineSL              := na
+    h.lineTP              := na
+    h.labelEntry          := na
+    h.labelSL             := na
+    h.labelTP             := na
+    h.labelResult         := na
+    h.isOpen              := false
+    h.isOrder             := false
+    h.isGetProfit         := false
+    h.isFinish            := false
+    h.isRiskFreeActive    := false
+    h.isRiskFreeClosed    := false
+    h.tradeCapitalAtEntry := 0.0
+    h.tradeRiskAmount     := 0.0
+    h.tradePnl            := 0.0
+    h.tradeOpenTime       := 0
+    h.tradeCloseTime      := 0
+    h.tradeDurationMinutes:= 0
+    h
+
+
+f_update_list(hook newHook) =>
+    int idx = array.indexof(hooksList, newHook)
+    if idx >= 0
+        array.set(hooksList, idx, newHook)
+
+// ══════════════════════════════════════════════════════════════════
+// SECTION 2.2 — CANDLE HELPERS
+// ══════════════════════════════════════════════════════════════════
+f_highest_between(int abs_from, int abs_to) =>
+    // abs_from و abs_to هر دو bar number مطلق هستن
+    float highest = na
+    int i = abs_from
+    while i <= abs_to
+        int off = bar_index - i
+        if na(highest) or high[off] > highest
+            highest := high[off]
+        i := i + 1
+    highest
+
+f_lowest_between(int abs_from, int abs_to) =>
+    float lowest = na
+    int i = abs_from
+    while i <= abs_to
+        int off = bar_index - i
+        if na(lowest) or low[off] < lowest
+            lowest := low[off]
+        i := i + 1
+    lowest
+
+f_is_red(i)   => close[i] < open[i]
+f_is_green(i) => close[i] > open[i]
+f_are_prev_lows_higher(int idx) => // 
+    int len = input_look_back_len
+    bool  result = true
+    float refLow = low[bar_index - idx]
+    for i = 1 to len
+        if low[bar_index - idx + i] < refLow
+            result := false
+            break
+    result
+
+// f_are_prev_highs_lower(int idx) => // sell
+//     int len = input_look_back_len
+//     bool  result = true
+//     float refHigh = high[bar_index - idx]
+//     for i = 1 to len
+//         if high[bar_index - idx + i] > refHigh
+//             result := false
+//             break
+//     result
+
+f_are_prev_highs_lower(int idx) =>
+    int   len    = input_look_back_len
+    bool  result = true
+    int   base   = bar_index - idx
+    if len > 0 and base >= 0
+        float refHigh = high[base]
+        for k = 1 to len
+            int off = base + k
+            if off > bar_index
+                break
+            if high[off] > refHigh
+                result := false
+                break
+    result
+
+f_check_zigzag_pattern_green(int idxStart, int idxEnd ) =>
+    flagIsZigzag = false
+    indexZigzag  = 0
+    indexStart   = bar_index - idxStart -1
+    indexEnd     = bar_index - idxEnd
+    // for i = indexStart - 1 to indexEnd + 1
+    for i = indexStart  to indexEnd + 1
+        if f_is_green(i)
+            indexZigzag  := i
+            flagIsZigzag := true
+            break
+    [flagIsZigzag ,indexZigzag ]
+
+
+f_check_zigzag_pattern_red(int idxStart, int idxEnd ) =>
+    flagIsZigzag = false
+    indexZigzag  = 0
+    indexStart   = bar_index - idxStart - 1
+    indexEnd     = bar_index - idxEnd
+    // for i = indexStart - 1 to indexEnd + 1
+    for i = indexStart  to indexEnd + 1
+        if f_is_red(i)
+            indexZigzag  := i
+            flagIsZigzag := true
+            break
+    [flagIsZigzag ,indexZigzag ]
+
+f_find_start_index_left_sharp_buy() =>
+    int startIdx = na
+    i = 1
+    while i < 30
+        if f_is_green(i)
+            startIdx := bar_index - i
+            i        := i + 1
+        else
+            break
+    startIdx
+
+f_find_start_index_left_sharp_sell() =>
+    int startIdx = na
+    i = 1
+    while i < 30
+        if f_is_red(i)
+            startIdx := bar_index - i
+            i        := i + 1
+        else
+            break
+    startIdx
+
+f_find_peak_index_buy() =>
+    int startIdx = na
+    i = 1
+    while i < 30
+        if f_is_red(i)
+            startIdx := bar_index - i
+            i        := i + 1
+        else
+            break
+    startIdx
+
+f_find_peak_index_sell() =>
+    int startIdx = na
+    i = 1
+    while i < 30
+        if f_is_green(i)
+            startIdx := bar_index - i
+            i        := i + 1
+        else
+            break
+    startIdx
+
+f_find_start_index_right_sharp_buy(int index_peak_hook) =>
+    bool isSignal = false
+    int startIdx  = na
+    index_end  = bar_index
+    index_peak = bar_index - index_peak_hook // exam: index_peak_hook = 200 - 198 = 2
+    i = index_peak // 2
+    while i < input_max_hook_bars
+        if(low[i] <= low)
+            float highest = f_highest_between(bar_index - i , bar_index - index_peak )
+            if highest > high[bar_index -index_peak_hook]
+                break
+
+            float lowest = f_lowest_between(bar_index - i, bar_index - index_peak)
+            if lowest < low[i]
+                i := i + 1
+                continue
+            // if f_are_prev_highs_lower(bar_index - i)
+            if f_are_prev_lows_higher(bar_index - i)
+                index_start = i
+                [flagIsZigzag ,indexZigzag ] = f_check_zigzag_pattern_red(bar_index - index_start ,bar_index - index_peak )
+                
+                isJustNode_1 = true
+                if  flagIsZigzag and input_just_node_1
+                    isJustNode_1 := false
+                    if low[indexZigzag] >= low
+                        isJustNode_1 := true
+
+                if flagIsZigzag and isJustNode_1
+                    startIdx := bar_index - i
+                    //check input_max_dollar_hook
+                    if high[index_peak] - low[i] <= input_max_dollar_hook
+                        
+                        all     = high[index_peak] - low[i]
+                        part    = high[index_peak] - low
+                        percent = part * 100 / all
+                        if percent >= input_max_pullback_hook 
+                            
+                            // f_draw_idx_label( bar_index - indexZigzag, "zigzag", color.green, true)
+                            // f_draw_idx_label( bar_index - index_start, "start", color.green, true)
+                            // f_draw_idx_label(  bar_index - index_peak,  "peak",  color.red,  false)
+                            // f_draw_idx_label(  bar_index ,  "end",  color.red,  false)
+                            if input_show_debug_sharp_right
+                                f_draw_hook_lines(
+                                                    bar_index - index_start,   // abs_start
+                                                    bar_index - index_peak,    // abs_peak
+                                                    bar_index,                 // abs_end
+                                                    bar_index - indexZigzag    // abs_zigzag
+                                                    )
+                            isSignal := true
+                            break
+                    else
+                        break
+
+        i := i + 1
+    [ isSignal ,startIdx ]
+f_find_start_index_right_sharp_sell(int index_peak_hook) =>
+    bool isSignal = false
+    int startIdx  = na
+    index_end  = bar_index
+    index_peak = bar_index - index_peak_hook // exam: index_peak_hook = 200 - 198 = 2
+
+    i = index_peak // 2
+    while i < input_max_hook_bars
+        
+        if(high[i] >= high)
+
+            float lowest = f_lowest_between(bar_index - i , bar_index - index_peak )
+            if lowest < low[bar_index -index_peak_hook]
+                break
+
+            float highest = f_highest_between(bar_index - i, bar_index - index_peak)
+            if highest > high[i]
+                i := i + 1
+                continue
+
+            // float highest = f_highest_between(bar_index - i , bar_index - index_peak )
+            // if highest > high[bar_index -index_peak_hook]
+            //     break
+
+            // float lowest = f_lowest_between(bar_index - i, bar_index - index_peak)
+            // if lowest < low[i]
+            //     i := i + 1
+            //     continue
+            if f_are_prev_highs_lower(bar_index - i)
+                
+                index_start = i
+                [flagIsZigzag ,indexZigzag ] = f_check_zigzag_pattern_green(bar_index - index_start ,bar_index - index_peak )
+                
+                
+                isJustNode_1 = true
+                if flagIsZigzag and input_just_node_1
+                    isJustNode_1 := false
+                    // log.info("{0} < {1}",indexZigzag,startIdx)
+                    if high[indexZigzag] <= high
+                        isJustNode_1 := true
+
+                if flagIsZigzag and isJustNode_1
+                    startIdx := bar_index - i
+                    //check input_max_dollar_hook
+                    if  high[i] - low[index_peak] <= input_max_dollar_hook
+                        
+                        all     = high[i] - low[index_peak]
+                        part    = high    - low[index_peak]
+                        percent = part * 100 / all
+                        if percent >= input_max_pullback_hook 
+                            
+                            // f_draw_idx_label( bar_index - indexZigzag, "zigzag", color.green, true)
+                            // f_draw_idx_label( bar_index - index_start, "start", color.green, true)
+                            // f_draw_idx_label(  bar_index - index_peak,  "peak",  color.red,  false)
+                            // f_draw_idx_label(  bar_index ,  "end",  color.red,  false)
+                            if input_show_debug_sharp_right
+                                f_draw_hook_lines_sell(
+                                                    bar_index - index_start,   // abs_start
+                                                    bar_index - index_peak,    // abs_peak
+                                                    bar_index,                 // abs_end
+                                                    bar_index - indexZigzag    // abs_zigzag
+                                                    )
+                            isSignal := true
+                            break
+                    else
+                        break
+
+        i := i + 1
+    [ isSignal ,startIdx ]
+
+f_check_max_pullback_hook_buy(hook newHook) =>
+    all     = newHook.pricePeak - newHook.priceStart
+    part    = newHook.pricePeak - newHook.priceEnd
+    percent = part * 100 / all
+    percent >= input_max_pullback_hook
+
+f_check_max_pullback_hook_sell(hook newHook) =>
+    all     = newHook.priceStart - newHook.pricePeak
+    part    = newHook.priceEnd   - newHook.pricePeak
+    percent = part * 100 / all
+    percent >= input_max_pullback_hook
+
+f_check_max_dollar_hook_buy(hook newHook) =>
+    (newHook.pricePeak - newHook.priceStart) <= input_max_dollar_hook
+
+f_check_max_dollar_hook_sell(hook newHook) =>
+    (newHook.priceStart - newHook.pricePeak) <= input_max_dollar_hook
+
+// ══════════════════════════════════════════════════════════════════
+// SECTION 2.1 — MANAGE ORDER / POSITION
+// ══════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
+// BUY  |  isSharpRightHook == false
+// ════════════════════════════════════════════════════════════
+f_manage_order_buy_normal(hook lastHook) =>
+    bool didConfirmBuy = false
+    [flagIsZigzag, indexZigzag] = f_check_zigzag_pattern_green(lastHook.indexPeak, lastHook.indexEnd )
+    if lastHook.priceStart > low
+        f_remove_hook(lastHook)
+    else if lastHook.pricePeak < high and not flagIsZigzag
+        f_remove_hook(lastHook)
+    else if lastHook.pricePeak < high
+        if lastHook.indexEnd - lastHook.indexPeak > 2
+            [flagIsZigzag2, indexZigzag2] = f_check_zigzag_pattern_green(lastHook.indexPeak, lastHook.indexEnd )
+            if flagIsZigzag2
+                if f_check_max_pullback_hook_buy(lastHook)
+                    if f_check_max_dollar_hook_buy(lastHook)
+                        // ── چک مجوز زمانی و slot ──
+                        if f_can_open_new_trade(lastHook)
+                            lastHook.isConfirmed         := true
+                            lastHook.isOpen              := true
+                            lastHook.priceStopLoss       := f_adjusted_sl(lastHook.pricePeak, lastHook.priceEnd)
+                            lastHook.priceTakeProfit     := lastHook.pricePeak + (lastHook.pricePeak - lastHook.priceStopLoss) * input_risk_reward
+                            lastHook.tradeCapitalAtEntry := equity
+                            lastHook.tradeOpenTime       := time  // ثبت زمان ورود
+                            [_sd, rAmt]                  = f_calc_risk(lastHook.pricePeak, lastHook.priceStopLoss, equity)
+                            lastHook.tradeRiskAmount     := rAmt
+                            didConfirmBuy                := true
+
+                            f_hook_draw_clean(lastHook)
+                            f_draw_position_buy(lastHook)
+                            f_update_list(lastHook) 
+
+                            // priceEntry       = lastHook.pricePeak
+                            // priceStopLoss    = lastHook.priceStopLoss
+                            // priceRemoveOrder = lastHook.priceStart
+
+                            // sendSignal(true, 'buy', priceEntry, priceStopLoss ,priceRemoveOrder )
+
+                        else
+                            f_remove_hook(lastHook)
+                else
+                    f_remove_hook(lastHook)
+        else
+            f_remove_hook(lastHook)
+    else if lastHook.priceEnd >= low
+        lastHook.indexEnd := bar_index
+        lastHook.priceEnd := low
+  
+        [flagIsZigzag3, indexZigzag3] = f_check_zigzag_pattern_green(lastHook.indexPeak, lastHook.indexEnd )
+        if flagIsZigzag3 and bar_index - lastHook.indexPeak > 1
+            if f_check_max_pullback_hook_buy(lastHook)
+                if f_check_max_dollar_hook_buy(lastHook)
+                    // ── چک مجوز زمانی و slot ──
+                    if f_can_open_new_trade(lastHook)
+                        f_hook_draw_clean(lastHook)
+                        lastHook.priceStopLoss   := f_adjusted_sl(lastHook.pricePeak, lastHook.priceEnd)
+                        lastHook.priceTakeProfit := lastHook.pricePeak + (lastHook.pricePeak - lastHook.priceStopLoss) * input_risk_reward
+                        lastHook.isOrder         := true
+
+                        f_draw_position_buy(lastHook)
+
+                        priceEntry       = lastHook.pricePeak
+                        priceStopLoss    = lastHook.priceStopLoss
+                        priceRemoveOrder = lastHook.priceStart
+
+                        sendSignal(true, 'buy', priceEntry, priceStopLoss ,priceRemoveOrder )
+
+
+        f_update_list(lastHook)
+
+    didConfirmBuy
+
+
+// ════════════════════════════════════════════════════════════
+// BUY  |  isSharpRightHook == true
+// ════════════════════════════════════════════════════════════
+f_manage_order_buy_sharp(hook lastHook) =>
+    bool didConfirmBuy = false
+
+    if lastHook.priceEnd > low
+        f_remove_hook(lastHook)
+    else if lastHook.pricePeak < high
+        if f_can_open_new_trade(lastHook)
+            lastHook.isConfirmed         := true
+            lastHook.isOpen              := true
+            lastHook.priceStopLoss       := f_adjusted_sl(lastHook.pricePeak, lastHook.priceEnd)
+            lastHook.priceTakeProfit     := lastHook.pricePeak + (lastHook.pricePeak - lastHook.priceStopLoss) * input_risk_reward
+            lastHook.tradeCapitalAtEntry := equity
+            lastHook.tradeOpenTime       := time  // ثبت زمان ورود
+            [_sd, rAmt]                  = f_calc_risk(lastHook.pricePeak, lastHook.priceStopLoss, equity)
+            lastHook.tradeRiskAmount     := rAmt
+            didConfirmBuy                := true
+            f_hook_draw_clean(lastHook)
+            f_draw_position_buy(lastHook)
+            f_update_list(lastHook)
+
+            priceEntry       = lastHook.pricePeak
+            priceStopLoss    = lastHook.priceStopLoss
+            priceRemoveOrder = lastHook.priceStart
+
+            sendSignal(true, 'buy', priceEntry, priceStopLoss ,priceRemoveOrder )
+        else
+            f_remove_hook(lastHook)
+
+    didConfirmBuy
+
+
+// ════════════════════════════════════════════════════════════
+// SELL  |  isSharpRightHook == false
+// ════════════════════════════════════════════════════════════
+f_manage_order_sell_normal(hook lastHook) =>
+    bool didConfirmSell = false
+    [flagIsZigzag, indexZigzag] = f_check_zigzag_pattern_red(lastHook.indexPeak, lastHook.indexEnd )
+    if lastHook.priceStart < high
+        f_remove_hook(lastHook)
+    else if lastHook.pricePeak > low and not flagIsZigzag
+        f_remove_hook(lastHook)
+    else if lastHook.pricePeak > low
+        if lastHook.indexEnd - lastHook.indexPeak > 2
+            [flagIsZigzag2, indexZigzag2] = f_check_zigzag_pattern_red(lastHook.indexPeak, lastHook.indexEnd )
+            if flagIsZigzag2
+                if f_check_max_pullback_hook_sell(lastHook)
+                    if f_check_max_dollar_hook_sell(lastHook)
+                        // ── چک مجوز زمانی و slot ──
+                        if f_can_open_new_trade(lastHook)
+                            lastHook.isConfirmed         := true
+                            lastHook.isOpen              := true
+                            lastHook.priceStopLoss       := f_adjusted_sl(lastHook.pricePeak, lastHook.priceEnd)
+                            lastHook.priceTakeProfit     := lastHook.pricePeak - (lastHook.priceStopLoss - lastHook.pricePeak) * input_risk_reward
+                            lastHook.tradeCapitalAtEntry := equity
+                            lastHook.tradeOpenTime       := time  // ثبت زمان ورود
+                            [_sd, rAmt]                  = f_calc_risk(lastHook.pricePeak, lastHook.priceStopLoss, equity)
+                            lastHook.tradeRiskAmount     := rAmt
+                            didConfirmSell               := true
+                            f_hook_draw_clean(lastHook)
+                            f_draw_position_sell(lastHook)
+                            f_update_list(lastHook)
+
+                            priceEntry       = lastHook.pricePeak
+                            priceStopLoss    = lastHook.priceStopLoss
+                            priceRemoveOrder = lastHook.priceStart
+
+                            sendSignal(true, 'sell', priceEntry, priceStopLoss ,priceRemoveOrder )
+
+                        else
+                            f_remove_hook(lastHook)
+                    else
+                        f_remove_hook(lastHook)
+                else
+                    f_remove_hook(lastHook)
+        else
+            f_remove_hook(lastHook)
+    else if lastHook.priceEnd <= high
+        lastHook.indexEnd := bar_index
+        lastHook.priceEnd := high
+
+        [flagIsZigzag3, indexZigzag3] = f_check_zigzag_pattern_red(lastHook.indexPeak, lastHook.indexEnd )
+        if flagIsZigzag3 and lastHook.indexEnd - lastHook.indexPeak > 2
+            if f_check_max_pullback_hook_sell(lastHook)
+                if f_check_max_dollar_hook_sell(lastHook)
+                    // ── چک مجوز زمانی و slot ──
+                    if f_can_open_new_trade(lastHook)
+                        f_hook_draw_clean(lastHook)
+                        lastHook.priceStopLoss   := f_adjusted_sl(lastHook.pricePeak, lastHook.priceEnd)
+                        lastHook.priceTakeProfit := lastHook.pricePeak - (lastHook.priceStopLoss - lastHook.pricePeak) * input_risk_reward
+                        lastHook.isOrder         := true
+                        f_draw_position_sell(lastHook)
+
+                        priceEntry       = lastHook.pricePeak
+                        priceStopLoss    = lastHook.priceStopLoss
+                        priceRemoveOrder = lastHook.priceStart
+                        // log.warning('start test {0}', priceEntry)
+                        sendSignal(true, 'sell', priceEntry, priceStopLoss ,priceRemoveOrder )
+                        // log.warning('end test')
+
+        f_update_list(lastHook)
+
+    didConfirmSell
+
+
+// ════════════════════════════════════════════════════════════
+// SELL  |  isSharpRightHook == true
+// ════════════════════════════════════════════════════════════
+f_manage_order_sell_sharp(hook lastHook) =>
+
+    bool didConfirmSell = false
+    if lastHook.priceEnd < high
+        f_remove_hook(lastHook)
+    else if lastHook.pricePeak > low
+        if f_can_open_new_trade(lastHook)
+
+            lastHook.isConfirmed         := true
+            lastHook.isOpen              := true
+            lastHook.priceStopLoss       := f_adjusted_sl(lastHook.pricePeak, lastHook.priceEnd)
+            lastHook.priceTakeProfit     := lastHook.pricePeak - (lastHook.priceStopLoss - lastHook.pricePeak) * input_risk_reward
+            lastHook.tradeCapitalAtEntry := equity
+            lastHook.tradeOpenTime       := time  // ثبت زمان ورود
+            [_sd, rAmt]                  = f_calc_risk(lastHook.pricePeak, lastHook.priceStopLoss, equity)
+            lastHook.tradeRiskAmount     := rAmt
+            didConfirmSell               := true
+            f_hook_draw_clean(lastHook)
+            f_draw_position_sell(lastHook)
+            f_update_list(lastHook)
+
+            priceEntry       = lastHook.pricePeak
+            priceStopLoss    = lastHook.priceStopLoss
+            priceRemoveOrder = lastHook.priceStart
+
+            sendSignal(true, 'sell', priceEntry, priceStopLoss ,priceRemoveOrder )
+        else
+            f_remove_hook(lastHook)
+
+    didConfirmSell
+// ════════════════════════════════════════════════════════════
+// Order  |  manage order
+// ════════════════════════════════════════════════════════════
+f_manage_order(hook lastHook) =>
+    bool didConfirmBuy  = false
+    bool didConfirmSell = false
+
+    if lastHook.typeSignal == "buy" and lastHook.isOpen == false
+        if lastHook.isSharpRightHook == false
+            didConfirmBuy := f_manage_order_buy_normal(lastHook)
+        else
+            didConfirmBuy := f_manage_order_buy_sharp(lastHook)
+
+    else if lastHook.typeSignal == "sell" and lastHook.isOpen == false
+        if lastHook.isSharpRightHook == false
+            didConfirmSell := f_manage_order_sell_normal(lastHook)
+        else
+            didConfirmSell := f_manage_order_sell_sharp(lastHook)
+    else
+        sendSignal(false ,'' ,0 ,0 ,0 )
+
+    [didConfirmBuy, didConfirmSell]
+// ════════════════════════════════════════════════════════════
+// Position  |  manage position
+// ════════════════════════════════════════════════════════════
+f_manage_position(hook lastHook, int tpCountSoFar, int slCountSoFar, int rfCountSoFar) =>
+    bool didTP = false
+    bool didSL = false
+    bool didRF = false
+
+    if lastHook.isOpen and not lastHook.isFinish  // ← not isFinish اضافه شد
+        // ── فعال‌سازی ریسک فری: انتقال حد ضرر به نقطهٔ ورود ──
+        if input_enable_risk_free and not lastHook.isRiskFreeActive
+            if lastHook.typeSignal == "buy"
+                float riskDist = lastHook.pricePeak - lastHook.priceStopLoss
+                float trigPx   = lastHook.pricePeak + riskDist * input_risk_free_trigger
+                if high >= trigPx
+                    lastHook.isRiskFreeActive := true
+                    lastHook.priceStopLoss    := lastHook.pricePeak   // SL → نقطهٔ ورود (سربه‌سر)
+            else if lastHook.typeSignal == "sell"
+                float riskDist = lastHook.priceStopLoss - lastHook.pricePeak
+                float trigPx   = lastHook.pricePeak - riskDist * input_risk_free_trigger
+                if low <= trigPx
+                    lastHook.isRiskFreeActive := true
+                    lastHook.priceStopLoss    := lastHook.pricePeak   // SL → نقطهٔ ورود (سربه‌سر)
+
+        if lastHook.typeSignal == "buy"
+            if lastHook.priceTakeProfit < high
+                lastHook.isGetProfit := true
+                lastHook.isFinish    := true
+            else if lastHook.priceStopLoss > low
+                lastHook.isFinish := true
+                if lastHook.isRiskFreeActive
+                    lastHook.isRiskFreeClosed := true
+                else
+                    lastHook.isGetProfit := false
+        if lastHook.typeSignal == "sell"
+            if lastHook.priceTakeProfit > low
+                lastHook.isGetProfit := true
+                lastHook.isFinish    := true
+            else if lastHook.priceStopLoss < high
+                lastHook.isFinish := true
+                if lastHook.isRiskFreeActive
+                    lastHook.isRiskFreeClosed := true
+                else
+                    lastHook.isGetProfit := false
+
+    if lastHook.isFinish and lastHook.tradeCloseTime == 0  // ← tradePnl==0 را عوض کن
+        lastHook.tradeCloseTime       := time
+        int durMs                      = lastHook.tradeCloseTime - lastHook.tradeOpenTime
+        lastHook.tradeDurationMinutes := durMs / 60000
+
+        float spreadCost = input_spread
+        if lastHook.isRiskFreeClosed
+            // معاملهٔ سربه‌سر: سود/زیان صفر (ریسک فری)
+            lastHook.tradePnl := 0.0
+            didRF             := true
+        else if lastHook.isGetProfit
+            // سود = ریسک × نسبت ریسک به ریوارد، منهای هزینه اسپرد
+            lastHook.tradePnl := lastHook.tradeRiskAmount * input_risk_reward - spreadCost
+            didTP             := true
+        else
+            lastHook.tradePnl := -(lastHook.tradeRiskAmount + spreadCost)
+            didSL             := true
+
+    f_draw_result(lastHook, tpCountSoFar + 1, slCountSoFar + 1, rfCountSoFar + 1)
+    f_update_list(lastHook)
+    [didTP, didSL, didRF, lastHook.tradePnl, lastHook.tradeDurationMinutes]
+// ══════════════════════════════════════════════════════════════════
+// SECTION 5.1 — DETECTION
+// ══════════════════════════════════════════════════════════════════
+f_check_hook_buy() =>
+    // left side of hook is sharp
+    if f_is_red(0) and f_is_green(1)
+        index_start_hook = f_find_start_index_left_sharp_buy()
+        bool lowOk       = f_are_prev_lows_higher(index_start_hook)
+        if lowOk
+            int   idx            = bar_index
+            float priceStartHook = low [bar_index - index_start_hook]
+            float pricePeakHook  = high
+            float priceEndHook   = low 
+
+        
+            hook newHook = f_hook_new(
+                 index_start_hook, idx, idx,
+                 priceStartHook, pricePeakHook, priceEndHook, "buy")
+            array.push(hooksList, newHook)
+
+
+    // right side of hook is sharp
+    if f_is_green(0) and f_is_red(1)
+        index_peak_hook = f_find_peak_index_buy()
+        if bar_index - index_peak_hook > input_min_size_sharp
+            [ isSignal ,index_start_hook ] = f_find_start_index_right_sharp_buy(index_peak_hook)
+            // bool lowOk       = f_are_prev_lows_higher(index_start_hook)
+            if isSignal
+                int   idx            = bar_index
+                float priceStartHook = low [bar_index - index_start_hook]
+                float pricePeakHook  = high[bar_index - index_peak_hook]
+                float priceEndHook   = low
+                hook newHook = f_hook_new(
+                    index_start_hook, index_peak_hook, idx,
+                    priceStartHook, pricePeakHook, priceEndHook, "buy")
+                newHook.isSharpRightHook := true
+
+                newHook.priceStopLoss       := f_adjusted_sl(newHook.pricePeak, newHook.priceEnd)
+                newHook.priceTakeProfit     := newHook.pricePeak + (newHook.pricePeak - newHook.priceStopLoss) * input_risk_reward
+                f_hook_draw_clean(newHook)
+                f_draw_position_buy(newHook)
+                newHook.isOrder := true
+
+
+                priceEntry       = newHook.pricePeak
+                priceStopLoss    = newHook.priceStopLoss
+                priceRemoveOrder = newHook.priceStart
+
+                sendSignal(true, 'buy', priceEntry, priceStopLoss ,priceRemoveOrder )
+                array.push(hooksList, newHook)
+                
+
+
+f_check_hook_sell() =>
+    if f_is_green(0) and f_is_red(1)
+        index_start_hook = f_find_start_index_left_sharp_sell()
+        bool lowOk       = f_are_prev_highs_lower(index_start_hook)
+        if lowOk
+            int   idx            = bar_index
+            float priceStartHook = high[bar_index - index_start_hook]
+            float pricePeakHook  = low
+            float priceEndHook   = high
+            hook newHook = f_hook_new(
+                 index_start_hook, idx, idx,
+                 priceStartHook, pricePeakHook, priceEndHook, "sell")
+            array.push(hooksList, newHook)
+    if f_is_red(0) and f_is_green(1)
+        index_peak_hook = f_find_peak_index_sell()
+        if bar_index - index_peak_hook > input_min_size_sharp
+            [ isSignal ,index_start_hook ] = f_find_start_index_right_sharp_sell(index_peak_hook)
+            // bool lowOk       = f_are_prev_lows_higher(index_start_hook)
+            if isSignal
+                int   idx            = bar_index
+                float priceStartHook = high [bar_index - index_start_hook]
+                float pricePeakHook  = low[bar_index - index_peak_hook]
+                float priceEndHook   = high
+                hook newHook = f_hook_new(
+                    index_start_hook, index_peak_hook, idx,
+                    priceStartHook, pricePeakHook, priceEndHook, "sell")
+                newHook.isSharpRightHook := true
+
+                f_hook_draw_clean(newHook)
+                newHook.priceStopLoss       := f_adjusted_sl(newHook.pricePeak, newHook.priceEnd)
+                newHook.priceTakeProfit     := newHook.pricePeak - (newHook.priceStopLoss - newHook.pricePeak) * input_risk_reward                                   
+                f_draw_position_sell(newHook)
+                newHook.isOrder := true
+                array.push(hooksList, newHook)
+
+                priceEntry       = newHook.pricePeak
+                priceStopLoss    = newHook.priceStopLoss
+                priceRemoveOrder = newHook.priceStart
+
+                sendSignal(true, 'sell', priceEntry, priceStopLoss ,priceRemoveOrder )
+// مقدار timestamp را روی کندل جاری به‌صورت تاریخ/ساعت خوانا چاپ می‌کند
+f_print_time_label(int t) =>
+    string txt = str.format_time(t, "yyyy-MM-dd HH:mm:ss", input_day_tz)
+    label.new(
+         x         = bar_index,
+         y         = high,
+         text      = "⏱ " + txt,
+         xloc      = xloc.bar_index,
+         yloc      = yloc.abovebar,
+         style     = label.style_label_down,
+         color     = color.new(color.blue, 0),
+         textcolor = color.white,
+         size      = size.small)
+// ══════════════════════════════════════════════════════════════════
+// SECTION 5.2 — SUGGESTED SPREAD (chart-adaptive)
+// ══════════════════════════════════════════════════════════════════
+// تخمین اسپرد بر اساس خود چارت:
+//   • پایه: ۰٫۰۱٪ از قیمت (۱ واحد پایه / 1 basis point) که با هر نماد و قیمتی هماهنگ می‌شود
+//   • کف: دست‌کم ۱ تیک قیمتی (mintick) تا روی نمادهای کم‌قیمت صفر نشود
+//   • نتیجه روی نزدیک‌ترین تیک گرد می‌شود تا قابل وارد کردن در فیلد باشد
+f_suggested_spread() =>
+    float raw     = math.max(close * 0.0001, syminfo.mintick)
+    float rounded = math.round(raw / syminfo.mintick) * syminfo.mintick
+    rounded
+
+// ══════════════════════════════════════════════════════════════════
+// SECTION 5.3 — DYNAMIC START (شروع از ابتدای روز جاری)
+// ══════════════════════════════════════════════════════════════════
+// تایم‌استمپِ شروع روز معاملاتی جاری بر اساس ساعت/دقیقهٔ تعیین‌شده (پیش‌فرض 01:30)
+// و timezone صرافی محاسبه می‌شود. مبنا «اکنون» (timenow) است:
+//   • زمان حال به اندازهٔ ساعتِ شروع به عقب شیفت می‌شود تا تاریخِ روز معاملاتیِ
+//     جاری به‌دست آید (اگر هنوز به ساعت شروع نرسیده‌ایم، روز قبل مبنا می‌ماند).
+//   • سپس تایم‌استمپِ ساعتِ شروعِ همان روز ساخته می‌شود.
+// چون مقایسه بر اساس زمان واقعی هر کندل (time) است، روی کندل‌های رنج هم دقیق است
+// و به فرضِ «هر کندل چند دقیقه» وابسته نیست.
+int  _nowAnchor      = timenow - (input_day_start_hour * 60 + input_day_start_minute) * 60000
+int  _todayStartTime = timestamp(input_day_tz, year(_nowAnchor, input_day_tz), month(_nowAnchor, input_day_tz), dayofmonth(_nowAnchor, input_day_tz), input_day_start_hour, input_day_start_minute, 0)
+
+// شرط ورود به محدودهٔ پردازش:
+//   • داینامیک روشن  → فقط کندل‌های روز جاری (از ساعت شروع به بعد)
+//   • داینامیک خاموش → دقیقاً مثل قبل، بر اساس عددِ «شروع از کندل»
+bool _inStartWindow = input_enable_dynamic_start ? (time >= _todayStartTime) : (bar_index >= last_bar_index - input_start_main_candle)
+
+// ══════════════════════════════════════════════════════════════════
+// SECTION 6 — MAIN LOOP
+// ══════════════════════════════════════════════════════════════════
+// reset flag is signal
+signal.priceEntry       := 0
+signal.priceStopLoss    := 0
+signal.priceRemoveOrder := 0
+signal.timeOrder        := 0
+if _inStartWindow and bar_index <= last_bar_index - input_end_main_candle
+    
+    if array.size(hooksList) > 0
+        for i = array.size(hooksList) - 1 to 0
+            if i > array.size(hooksList) - 1
+                continue
+            h = array.get(hooksList, i)
+
+            if h.isConfirmed and h.isFinish
+                continue
+
+            if not h.isConfirmed
+                [isBuyConfirmed, isSellConfirmed] = f_manage_order(h)
+                if isBuyConfirmed
+                    cntBuy            := cntBuy + 1
+                    lastTradeOpenTime := time
+                    // f_print_time_label(lastTradeOpenTime)   // ← چاپ زمان
+                    f_clear_other_pending_orders(h)
+                if isSellConfirmed
+                    cntSell           := cntSell + 1
+                    lastTradeOpenTime := time
+                    // f_print_time_label(lastTradeOpenTime)   // ← چاپ زمان
+                    f_clear_other_pending_orders(h)
+
+            if h.isConfirmed and not h.isFinish
+                [isTP, isSL, isRF, pnlVal, durMin] = f_manage_position(h, cntTP, cntSL, cntRF)
+                if isTP
+                    cntTP          := cntTP + 1
+                    totalProfit    := totalProfit + pnlVal
+                    equity         := equity + pnlVal
+                    grossPnl       := grossPnl + pnlVal
+                    totalDurationMin := totalDurationMin + durMin
+                if isSL
+                    cntSL          := cntSL + 1
+                    totalLoss      := totalLoss + math.abs(pnlVal)
+                    equity         := equity + pnlVal
+                    grossPnl       := grossPnl + pnlVal
+                    totalDurationMin := totalDurationMin + durMin
+                if isRF
+                    cntRF          := cntRF + 1
+                    // معاملهٔ ریسک فری سربه‌سر است (pnl = 0) → equity تغییری نمی‌کند
+                    equity         := equity + pnlVal
+                    grossPnl       := grossPnl + pnlVal
+                    totalDurationMin := totalDurationMin + durMin
+                if isTP or isSL or isRF
+                    if equity > peakEquity
+                        peakEquity := equity
+                    float dd = (peakEquity - equity) / peakEquity * 100.0
+                    if dd > maxDrawdown
+                        maxDrawdown := dd
+
+    f_check_hook_buy()
+    f_check_hook_sell()
+// ══════════════════════════════════════════════════════════════════
+// SECTION 7 — STATS TABLE
+// ══════════════════════════════════════════════════════════════════
+var table statsTable = na
+
+if barstate.islast
+    if not na(statsTable)
+        table.delete(statsTable)
+
+    int   totalTrades = cntTP + cntSL + cntRF
+    float winRate     = totalTrades > 0 ? (cntTP / totalTrades) * 100.0 : 0.0
+    float netPnl      = equity - input_initial_capital
+    float returnPct   = (netPnl / input_initial_capital) * 100.0
+    float pf          = totalLoss > 0 ? totalProfit / totalLoss : totalProfit > 0 ? 999.0 : 0.0
+    float sugSpread   = f_suggested_spread()
+
+    color clrNet  = netPnl    >= 0  ? color.new(color.lime, 0)   : color.new(color.red, 0)
+    color clrWR   = winRate   >= 50 ? color.new(color.lime, 0)   : color.new(color.orange, 0)
+    color clrDD   = maxDrawdown < 10 ? color.new(color.lime, 0) : maxDrawdown < 25 ? color.new(color.orange, 0) : color.new(color.red, 0)
+    color clrPF   = pf        >= 1.0 ? color.new(color.lime, 0)  : color.new(color.red, 0)
+
+    color hdrBg  = color.new(color.navy,  10)
+    color rowBg1 = color.new(color.black, 20)
+    color rowBg2 = color.new(color.black, 40)
+    color txtHdr = color.new(color.white,  0)
+    color txtDim = color.new(color.silver, 0)
+
+    statsTable := table.new(
+         position    = position.top_right,
+         columns     = 2,
+         rows        = 17,
+         border_color= color.new(color.gray, 50),
+         border_width= 1,
+         frame_color = color.new(color.gray, 30),
+         frame_width = 2)
+
+    table.cell(statsTable, 0, 0, "📊  HOOK PERFORMANCE",
+         text_color=txtHdr, bgcolor=hdrBg,
+         text_size=size.normal, text_halign=text.align_center)
+    table.merge_cells(statsTable, 0, 0, 1, 0)
+
+    string[] keys = array.from(
+         "💵 سرمایه اولیه",
+         "💰 سرمایه فعلی",
+         "📈 سود/زیان خالص",
+         "📊 بازدهی %",
+         "📉 Max Drawdown",
+         "🏆 Win Rate",
+         "⚖️  Profit Factor",
+         "🎯 نسبت R:R",
+         "🔢 کل معاملات",
+         "✅ تعداد TP",
+         "❌ تعداد SL",
+         "🛡 تعداد ریسک فری (RF)",
+         "🟢 تعداد Buy",
+         "🔴 تعداد Sell",
+         "💡 اسپرد پیشنهادی")
+
+    string[] vals = array.from(
+         "$"  + str.tostring(input_initial_capital, "#,###.##"),
+         "$"  + str.tostring(equity,                "#,###.##"),
+         (netPnl    >= 0 ? "+" : "") + "$" + str.tostring(netPnl,      "#,###.##"),
+         (returnPct >= 0 ? "+" : "") +        str.tostring(returnPct,   "#.##") + "%",
+         str.tostring(maxDrawdown, "#.##") + "%",
+         str.tostring(winRate,     "#.##") + "%",
+         str.tostring(pf,          "#.##"),
+         "1 : " + str.tostring(input_risk_reward, "#.##"),
+         str.tostring(totalTrades, "#"),
+         str.tostring(cntTP,       "#"),
+         str.tostring(cntSL,       "#"),
+         str.tostring(cntRF,       "#"),
+         str.tostring(cntBuy,      "#"),
+         str.tostring(cntSell,     "#"),
+         "$" + str.tostring(sugSpread, format.mintick))
+
+    color[] clrs = array.from(
+         txtDim, color.new(color.white, 0), clrNet,  clrNet,
+         clrDD,  clrWR, clrPF,
+         color.new(color.aqua, 0),
+         txtDim, color.new(color.lime,  0), color.new(color.red,  0),
+         color.new(color.aqua, 0),
+         txtDim, txtDim,
+         color.new(color.yellow, 0))
+
+    for r = 0 to array.size(keys) - 1
+        color bg = r % 2 == 0 ? rowBg1 : rowBg2
+        table.cell(statsTable, 0, r + 1,
+             array.get(keys, r),
+             text_color=txtDim, bgcolor=bg,
+             text_size=size.small, text_halign=text.align_left)
+        table.cell(statsTable, 1, r + 1,
+             array.get(vals, r),
+             text_color=array.get(clrs, r), bgcolor=bg,
+             text_size=size.small, text_halign=text.align_right)
+
+plotbar(signal.priceEntry,signal.priceStopLoss,signal.priceRemoveOrder ,signal.timeOrder,color = color.rgb(128, 128, 128, 40),precision = 5 ,display =display.data_window )
+
