@@ -577,6 +577,19 @@ void Render(void)
       return;
      }
 
+   //--- the mapping every overlay is projected through. Fixed here, before
+   //--- anything is painted, because the strategy tints go under the bars.
+   g_view.plot_r   = plot_r;
+   g_view.plot_t   = plot_t;
+   g_view.plot_b   = plot_b;
+   g_view.plot_h   = plot_h;
+   g_view.hi       = hi;
+   g_view.lo       = lo;
+   g_view.span     = span;
+   g_view.step     = g_step;
+   g_view.anchor_x = AnchorX();
+   g_view.last_slot= last;
+
    //--- grid + price axis
    const double gstep=NiceStep(span/6.0);
    for(double p=MathCeil(lo/gstep)*gstep; p<=hi; p+=gstep)
@@ -586,6 +599,11 @@ void Render(void)
       g_cv.TextOut(plot_r+6,y-7,DoubleToString(p,_Digits),ColorToARGB(InpText,255));
      }
    g_cv.LineVertical(plot_r,0,g_h,ColorToARGB(InpGrid,255));
+
+   //--- risk bands go down first, so the bars paint over them and the price
+   //--- action inside a position stays visible
+   if(InpHookOn && InpHookDraw)
+      HkRenderFills(GetPointer(g_cv),g_view,GetPointer(g_strat),InpBg);
 
    //--- bars
    const int lw    =(g_step>=14.0 ? 2 : 1);                    // stroke width
@@ -647,19 +665,7 @@ void Render(void)
         }
      }
 
-   //--- the mapping every drawing is projected through
-   g_view.plot_r   = plot_r;
-   g_view.plot_t   = plot_t;
-   g_view.plot_b   = plot_b;
-   g_view.plot_h   = plot_h;
-   g_view.hi       = hi;
-   g_view.lo       = lo;
-   g_view.span     = span;
-   g_view.step     = g_step;
-   g_view.anchor_x = AnchorX();
-   g_view.last_slot= last;
-
-   //--- strategy overlays go under the user's drawings
+   //--- entry, stop and target ride above the bars, under the user's drawings
    if(InpHookOn && InpHookDraw)
       HkRenderAll(GetPointer(g_cv),g_view,GetPointer(g_strat),_Digits,InpBg,InpText);
 

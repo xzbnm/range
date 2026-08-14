@@ -121,8 +121,46 @@ void HkRect(CCanvas *cv,const SView &v,int x1,int y1,int x2,int y2,const uint cl
   }
 
 //+------------------------------------------------------------------+
-//| One hook: the risk box, the entry / stop / target levels and the  |
-//| TP-SL-RF tag a finished trade leaves behind.                      |
+//| Background pass: the risk band between entry and stop, nothing    |
+//| else.                                                             |
+//|                                                                   |
+//| The canvas is XRGB with no alpha, so a fill cannot be blended      |
+//| against what is already there. Painting it before the bars gets    |
+//| the same result for free - the tint replaces background and grid   |
+//| pixels, then every bar is drawn straight over it, so the price     |
+//| action inside a position stays fully readable.                     |
+//+------------------------------------------------------------------+
+void HkFillOne(CCanvas *cv,const SView &v,CHook *h,const color bg)
+  {
+   if(h==NULL || !h.isDrawn)
+      return;
+
+   const int x1=(int)MathRound(BarToX(v,h.indexPeak));
+   const int x2=(int)MathRound(BarToX(v,h.indexPeak+HK_BOX_BARS));
+   if(x2<0 || x1>v.plot_r)
+      return;
+
+   const int ye=(int)MathRound(PriceToY(v,h.pricePeak));
+   const int ys=(int)MathRound(PriceToY(v,h.priceStopLoss));
+
+   HkFill(cv,v,x1,ye,x2,ys,RcBlend(clrRed,bg,0.12));
+  }
+
+//+------------------------------------------------------------------+
+void HkRenderFills(CCanvas *cv,const SView &v,CHookStrategy *st,const color bg)
+  {
+   if(st==NULL)
+      return;
+
+   const int n=st.HookCount();
+   for(int i=0;i<n;i++)
+      HkFillOne(cv,v,st.HookAt(i),bg);
+  }
+
+//+------------------------------------------------------------------+
+//| Foreground pass: the box outline, the entry / stop / target       |
+//| levels and the TP-SL-RF tag a finished trade leaves behind. Runs  |
+//| after the bars so the levels stay on top of them.                 |
 //+------------------------------------------------------------------+
 void HkRenderOne(CCanvas *cv,const SView &v,CHook *h,const int digits,
                  const color bg,const color txt)
@@ -139,8 +177,6 @@ void HkRenderOne(CCanvas *cv,const SView &v,CHook *h,const int digits,
    const int ys=(int)MathRound(PriceToY(v,h.priceStopLoss));
    const int yt=(int)MathRound(PriceToY(v,h.priceTakeProfit));
 
-   //--- risk band, entry to stop
-   HkFill(cv,v,x1,ye,x2,ys,RcBlend(clrRed,bg,0.12));
    HkRect(cv,v,x1,ye,x2,ys,RcBlend(clrRed,bg,0.40));
 
    //--- a live position gets a solid entry line, a pending order a dashed one

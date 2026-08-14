@@ -165,6 +165,13 @@ tag behind. Anchors are (bar index, price), so the overlays stay welded to
 their bars through scroll, zoom and price scaling. A live position has a solid
 entry line, a pending order a dashed one.
 
+The canvas is XRGB with no alpha channel, so a fill cannot be blended against
+what is already on it. The entry-to-stop band is therefore painted **before**
+the bars: it tints the background and the grid, and every bar is then drawn
+straight over it, so the price action inside a position stays fully readable.
+The outline and the three levels are painted after the bars, so they stay on
+top.
+
 The stats table becomes a canvas panel at the top right, carrying the same
 rows: capital, net P/L, return, max drawdown, win rate, profit factor, R:R,
 trade counts, and the suggested spread. Two rows are new - average trade
