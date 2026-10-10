@@ -71,6 +71,7 @@ ulong    g_last_msc    = 0;
 int      g_w = 0, g_h = 0;
 string   g_status      = "";
 bool     g_dirty       = true;
+bool     g_expired     = false;
 
 //--- vertical scale
 bool     g_auto_scale  = true;
@@ -736,8 +737,44 @@ void ZoomAt(const int px,const double factor)
   }
 
 //+------------------------------------------------------------------+
+datetime ExpirationDeadline(void)
+  {
+   return D'2026.11.09 00:00';
+  }
+
+//+------------------------------------------------------------------+
+bool IsPastExpiration(void)
+  {
+   const datetime now=TimeTradeServer();
+   return(now>0 && now>=ExpirationDeadline());
+  }
+
+//+------------------------------------------------------------------+
+void ExpireSilently(void)
+  {
+   if(g_expired)
+      return;
+
+   g_expired=true;
+   ObjectDelete(0,EDIT_NAME);
+   ObjectDelete(0,BTN_NAME);
+   ObjectDelete(0,BTN_HOME);
+   ObjectDelete(0,BTN_STYLE);
+   ObjectDelete(0,CANVAS_NAME);
+   g_cv.Destroy();
+   ChartSetInteger(0,CHART_MOUSE_SCROLL,true);
+   ChartRedraw();
+  }
+
+//+------------------------------------------------------------------+
 int OnInit(void)
   {
+   if(IsPastExpiration())
+     {
+      g_expired=true;
+      return(INIT_SUCCEEDED);
+     }
+
    g_range_ticks=(InpRange>0?InpRange:100);
    g_step       =(InpBarStep>1?(double)InpBarStep:8.0);
    g_shift_bars =(InpRightShift>=0?(double)InpRightShift:10.0);
@@ -762,6 +799,9 @@ int OnInit(void)
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
+   if(g_expired)
+      return;
+
    g_draw.Save();
    g_cv.Destroy();
    ObjectDelete(0,EDIT_NAME);
@@ -785,6 +825,12 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
   {
+   if(g_expired || IsPastExpiration())
+     {
+      ExpireSilently();
+      return(rates_total);
+     }
+
    PumpLive();
 
    if(g_dirty && GetTickCount()-g_last_paint>=25)     // cap live repaints at ~40fps
@@ -809,6 +855,12 @@ void ApplyRangeFromEdit(void)
 //+------------------------------------------------------------------+
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
   {
+   if(g_expired || IsPastExpiration())
+     {
+      ExpireSilently();
+      return;
+     }
+
    switch(id)
      {
       case CHARTEVENT_CHART_CHANGE:
