@@ -13,63 +13,11 @@
 #property copyright "Range Chart"
 
 #include <Canvas\Canvas.mqh>
+#include "RangeDrawingModel.mqh"
+#include "RangeDrawingStore.mqh"
 
 //+------------------------------------------------------------------+
-enum ENUM_RC_TOOL
-  {
-   TOOL_CROSS = 0,   // crosshair, draws nothing
-   TOOL_TREND,       // trend line
-   TOOL_RAY,         // ray, extends to the right
-   TOOL_HLINE,       // horizontal line
-   TOOL_VLINE,       // vertical line
-   TOOL_RECT,        // rectangle
-   TOOL_FIB,         // fib retracement
-   TOOL_MEASURE,     // price/bar ruler
-   TOOL_TEXT,        // text label
-   TOOL_NOTE,        // callout
-   TOOL_LONG,        // long position
-   TOOL_SHORT,       // short position
-   TOOL_COUNT
-  };
-
-//--- one drawing. bar/price pairs are the anchors; p3 is the third price
-//--- used by the position tools (entry, target, stop)
-struct SDrawing
-  {
-   int      type;
-   double   bar1,price1;
-   double   bar2,price2;
-   double   price3;
-   color    clr;
-   int      width;
-   string   text;
-   bool     alive;
-  };
-
-//--- the pixel <-> data mapping for the frame being drawn
-struct SView
-  {
-   int      plot_r,plot_t,plot_b,plot_h;
-   double   hi,lo,span;
-   double   step,anchor_x;
-   int      last_slot;
-  };
-
-//+------------------------------------------------------------------+
-double BarToX  (const SView &v,const double bar) { return(v.anchor_x-(v.last_slot-bar)*v.step); }
-double XToBar  (const SView &v,const double x)   { return(v.last_slot-(v.anchor_x-x)/v.step);   }
-double PriceToY(const SView &v,const double p)   { return(v.plot_t+(v.hi-p)/v.span*v.plot_h);   }
-double YToPrice(const SView &v,const double y)   { return(v.hi-(y-v.plot_t)/v.plot_h*v.span);   }
-
-//--- palette cycled by the colour swatch in the properties strip
-const color RC_PALETTE[8]=
-  {
-   C'41,98,255',  C'38,166,154', C'239,83,80',  C'255,183,77',
-   C'156,39,176', C'0,188,212',  C'209,212,220',C'120,123,134'
-  };
-
-//+------------------------------------------------------------------+
-//| Drawing store: hit testing, editing, rendering, persistence.     |
+//| In-memory drawing collection, editing, hit testing, and rendering.|
 //+------------------------------------------------------------------+
 class CDrawings
   {
@@ -543,64 +491,14 @@ void CDrawings::RenderAll(const SView &v,const int selected,const int digits)
 //+------------------------------------------------------------------+
 bool CDrawings::Save(void)
   {
-   if(m_file=="")
-      return(false);
-
-   const int fh=FileOpen(m_file,FILE_WRITE|FILE_CSV|FILE_ANSI,',');
-   if(fh==INVALID_HANDLE)
-      return(false);
-
-   for(int i=0;i<m_count;i++)
-     {
-      if(!m_items[i].alive)
-         continue;
-
-      FileWrite(fh,m_items[i].type,
-                DoubleToString(m_items[i].bar1,2),  DoubleToString(m_items[i].price1,8),
-                DoubleToString(m_items[i].bar2,2),  DoubleToString(m_items[i].price2,8),
-                DoubleToString(m_items[i].price3,8),
-                (int)m_items[i].clr,m_items[i].width,m_items[i].text);
-     }
-
-   FileClose(fh);
-   return(true);
+   return(RangeDrawingStoreSave(m_file,m_items,m_count));
   }
 
 //+------------------------------------------------------------------+
 bool CDrawings::Load(void)
   {
    Clear();
-
-   if(m_file=="" || !FileIsExist(m_file))
-      return(false);
-
-   const int fh=FileOpen(m_file,FILE_READ|FILE_CSV|FILE_ANSI,',');
-   if(fh==INVALID_HANDLE)
-      return(false);
-
-   while(!FileIsEnding(fh))
-     {
-      SDrawing d;
-      d.type  =(int)FileReadNumber(fh);
-      if(FileIsEnding(fh))
-         break;
-
-      d.bar1  =FileReadNumber(fh);
-      d.price1=FileReadNumber(fh);
-      d.bar2  =FileReadNumber(fh);
-      d.price2=FileReadNumber(fh);
-      d.price3=FileReadNumber(fh);
-      d.clr   =(color)(int)FileReadNumber(fh);
-      d.width =(int)FileReadNumber(fh);
-      d.text  =FileReadString(fh);
-      d.alive =true;
-
-      if(d.type>=0 && d.type<TOOL_COUNT)
-         Add(d);
-     }
-
-   FileClose(fh);
-   return(true);
+   return(RangeDrawingStoreLoad(m_file,m_items,m_count));
   }
 
 //+------------------------------------------------------------------+
