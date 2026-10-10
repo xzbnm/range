@@ -14,6 +14,7 @@ RangeModules/
   RangeDrawings.mqh                   drawing editing and rendering
   RangeStrategyData.mqh               future strategy-neutral trade record
   RangeStrategyStore.mqh              future strategy CSV persistence
+  Indicators/NodalCounting/           optional NDS overlay, engine, and CCanvas UI
   README.md                           install and user documentation
   CLAUDE.md                           this working brief
   verify_engine.py                    range bar reference check
@@ -27,6 +28,7 @@ Compile only `RangeChartCanvas.mq5`. Keep each `.mqh` in `RangeModules/`; the ma
 - `CRangeChartRenderer` paints only chart grid, price labels, OHLC bars, and the forming-bar close. `Render()` in the main file owns the full-frame order and user interface composition.
 - `RangeDrawingModel.mqh` owns `SDrawing`, `SView`, tool identifiers, palette, and pixel/data conversion.
 - `CDrawings` owns the in-memory drawing collection, hit testing, editing, toolbar, and shape rendering. It delegates serialization to `RangeDrawingStore.mqh`.
+- `CNodalCountingEngine` ports the supplied Pine NDS calculation over the current range-bar stream. `CNodalCountingCanvas` owns its visibility control, settings panel, and labels; its computation remains independent from chart rendering.
 - `CStrategyStore` and `STradeRecord` are dormant extension points. They are independent of the chart and drawing classes and have no caller in the indicator.
 
 ## Range engine invariants
@@ -43,8 +45,8 @@ Do not change these behaviors while removing strategy logic or moving render cod
 2. Set `g_view` projection.
 3. Draw grid and price axis through `CRangeChartRenderer`.
 4. Draw completed and forming OHLC bars.
-5. Draw the forming close line/tag.
-6. Draw user shapes, selection/placement previews, crosshair, header, toolbar, and status text.
+5. Draw the forming close line/tag and optional Nodal Counting labels.
+6. Draw user shapes, selection/placement previews, crosshair, header, toolbar, and status text; draw an open NDS settings panel above drawing overlays.
 7. Update the canvas.
 
 The drawing tools' manual long/short position shapes are annotations only; no trade logic is connected to them.
@@ -61,5 +63,5 @@ Version 1 columns are `schema_version`, `trade_id`, `strategy_id`, `symbol`, `ra
 
 - MQL5 `CCanvas` has no alpha channel in this project; render in explicit order.
 - Strategy code, signal inputs, trade overlays, and performance dashboards do not belong in the current chart.
-- No MQL compiler is available in the development environment; compilation must be checked in MetaEditor when available.
+- Compile the root indicator in MetaEditor when available and report the compiler result.
 - Do not add or run tests unless the user requests it; report when compilation or behavioral checks were not run.

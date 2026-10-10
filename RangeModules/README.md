@@ -74,6 +74,12 @@ No strategy currently calls the strategy data or store modules. Future strategie
 
 The version 1 row columns are `schema_version`, `trade_id`, `strategy_id`, `symbol`, `range_ticks`, `direction`, `entry_time`, `entry_price`, `stop_price`, `target_price`, `exit_time`, `exit_price`, `outcome`, `pnl`, and a trailing `END` row marker. The marker lets the loader reject incomplete records. Append requires a trade ID and strategy ID; commas and line breaks are rejected in all text fields so CSV columns remain aligned. Direction is `1` for long and `-1` for short. Outcome is `0` open, `1` win, `2` loss, `3` breakeven, or `4` cancelled.
 
+## Nodal Counting overlay
+
+The optional Nodal Counting overlay is part of `RangeChartCanvas.mq5`; it is not a separate compiled indicator. Its implementation is isolated under `Indicators/NodalCounting/`: the model holds settings and node records, the engine ports the supplied Pine NDS pivot/correction and symmetry rules, and the canvas adapter draws labels and provides its own CCanvas settings panel. It counts this chart's synthetic range bars, so its pivots can differ from NDS running over time-based TradingView candles.
+
+The `NDS ON/OFF` control beside the Range controls hides or shows the overlay. The adjacent `...` control opens settings for the start/end bar window, symmetry, label size, and eight individually editable colors. Defaults follow the Pine example: 2200 start bars, end bar 0, symmetry enabled, Normal labels, and the sample color sequence. The Pine source's connecting-line drawing is commented out, so this module renders the numbered pivot labels only.
+
 ## Source checks
 
 `verify_engine.py` compares the range-bar rules with two reference bars. No Hook Sharp source, strategy simulator, strategy inputs, or trade dashboard is included.

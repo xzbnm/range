@@ -12,6 +12,7 @@
 #include "RangeModules\\RangeDrawings.mqh"
 #include "RangeModules\\RangeChartRenderer.mqh"
 #include "RangeModules\\RangeStrategyStore.mqh"
+#include "RangeModules\\Indicators\\NodalCounting\\NodalCountingCanvas.mqh"
 
 //--- inputs
 input ENUM_RC_STYLE InpStyle = RC_BARS;           // Chart style
@@ -58,6 +59,7 @@ input color  InpText      = C'209,212,220';       // Text
 CCanvas          g_cv;
 CRangeAggregator g_agg;
 CRangeChartRenderer g_renderer;
+CNodalCountingCanvas g_nds;
 
 int      g_range_ticks = 100;
 ENUM_RC_STYLE g_style  = RC_BARS;
@@ -330,6 +332,8 @@ void Rebuild(void)
    g_status=StringFormat("%s  R=%d (%.*f)  bars=%d  src=%s  %dms",
                          _Symbol,g_range_ticks,_Digits,g_range_ticks*g_tick_size,
                          g_agg.Total(),src,(int)(GetTickCount()-t0));
+   if(g_nds.Enabled())
+      g_nds.Rebuild(GetPointer(g_agg));
    g_dirty=true;
   }
 
@@ -343,6 +347,8 @@ void PumpLive(void)
         {
          g_agg.AddTick(t.bid,t.time,1);
          g_last_msc=t.time_msc;
+         if(g_nds.Enabled())
+            g_nds.Rebuild(GetPointer(g_agg));
          g_dirty=true;
         }
       return;
@@ -350,15 +356,19 @@ void PumpLive(void)
 
    MqlTick buf[];
    const int n=CopyTicksRange(_Symbol,buf,COPY_TICKS_INFO,g_last_msc+1,0);
+   bool changed=false;
    for(int i=0;i<n;i++)
      {
       if(buf[i].bid>0.0)
         {
          g_agg.AddTick(buf[i].bid,buf[i].time,1);
          g_dirty=true;
+         changed=true;
         }
       g_last_msc=buf[i].time_msc;
      }
+   if(changed && g_nds.Enabled())
+      g_nds.Rebuild(GetPointer(g_agg));
   }
 
 //+------------------------------------------------------------------+
@@ -399,6 +409,16 @@ void Render(void)
    if(total<=0)
      {
       g_cv.TextOut(12,plot_t+20,"no data",ColorToARGB(InpText,255));
+      SView empty_view;
+      ZeroMemory(empty_view);
+      empty_view.plot_r=plot_r;
+      empty_view.plot_t=plot_t;
+      empty_view.plot_b=plot_b;
+      empty_view.plot_h=plot_h;
+      empty_view.anchor_x=AnchorX();
+      empty_view.last_slot=0;
+      g_nds.Render(GetPointer(g_cv),empty_view,0,-1,InpText);
+      g_nds.RenderPanel(GetPointer(g_cv),InpText);
       g_cv.Update();
       return;
      }
@@ -461,6 +481,7 @@ void Render(void)
    g_renderer.DrawCurrentClose(GetPointer(g_cv),g_view,g_w,
                                has_cur && g_scroll<=0,cur,InpBull,InpBear,
                                InpText,_Digits);
+   g_nds.Render(GetPointer(g_cv),g_view,first,last_real,InpText);
 
    g_draw.RenderAll(g_view,g_sel,_Digits);
 
@@ -508,7 +529,7 @@ void Render(void)
    if(hb_ok)
      {
       const uint hc=ColorToARGB(hb.close>=hb.open?InpBull:InpBear,255);
-      int x=PANEL_W+16;
+      int x=PANEL_W+150;
       const string keys[4]={"O","H","L","C"};
       const double vals[4]={hb.open,hb.high,hb.low,hb.close};
 
@@ -580,6 +601,8 @@ void Render(void)
          TbGlyph(GetPointer(g_cv),-1,sx+86,sy+12,ColorToARGB(C'239,83,80',255));
         }
      }
+
+   g_nds.RenderPanel(GetPointer(g_cv),InpText);
 
    //--- status
    g_cv.TextOut(8,g_h-16,g_status,ColorToARGB(C'120,123,134',255));
@@ -874,6 +897,14 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
          g_mx=x; g_my=y;
          g_cross=(x>=0 && x<g_w && y>=0 && y<g_h);
 
+         if(press && g_nds.HandleClick(x,y))
+           {
+            if(g_nds.Enabled())
+               g_nds.Rebuild(GetPointer(g_agg));
+            Repaint();
+            return;
+           }
+
          const double mbar  =XToBar  (g_view,x);
          const double mprice=YToPrice(g_view,y);
 
@@ -948,7 +979,8 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
            }
 
          const bool in_plot=(y>PlotT() && y<PlotB() && x<PlotR() &&
-                             !InPanel(x,y) && !InToolbar(x,y));
+                             !InPanel(x,y) && !InToolbar(x,y) &&
+                             !g_nds.IsPointerOverUi(x,y));
 
          //--- 3. laying down a new drawing
          if(g_placing)
@@ -1066,6 +1098,15 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
 
       case CHARTEVENT_KEYDOWN:
         {
+         bool nds_settings_changed=false;
+         if(g_nds.HandleKey((int)lparam,nds_settings_changed))
+           {
+            if(nds_settings_changed && g_nds.Enabled())
+               g_nds.Rebuild(GetPointer(g_agg));
+            Repaint();
+            return;
+           }
+
          const int total=BarCount();
          switch((int)lparam)
            {
