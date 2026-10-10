@@ -72,7 +72,7 @@ Drawings are saved as CSV in the terminal's `MQL5/Files/` folder, one file per s
 
 No strategy currently calls the strategy data or store modules. Future strategies should initialize `STradeRecord` with `StrategyRecordInit()` and pass records to `CStrategyStore` rather than writing files directly. Its default file is `RC_trades.csv` under `MQL5/Files/`; each row begins with schema version `1`, and the store rejects unsupported versions so a migration can be added deliberately. This is file-backed persistence, not a relational database.
 
-The version 1 row columns are `schema_version`, `trade_id`, `strategy_id`, `symbol`, `range_ticks`, `direction`, `entry_time`, `entry_price`, `stop_price`, `target_price`, `exit_time`, `exit_price`, `outcome`, and `pnl`. A record needs a trade ID and strategy ID before append. Direction is `1` for long and `-1` for short. Outcome is `0` open, `1` win, `2` loss, `3` breakeven, or `4` cancelled.
+The version 1 row columns are `schema_version`, `trade_id`, `strategy_id`, `symbol`, `range_ticks`, `direction`, `entry_time`, `entry_price`, `stop_price`, `target_price`, `exit_time`, `exit_price`, `outcome`, `pnl`, and a trailing `END` row marker. The marker lets the loader reject incomplete records. Append requires a trade ID and strategy ID; commas and line breaks are rejected in all text fields so CSV columns remain aligned. Direction is `1` for long and `-1` for short. Outcome is `0` open, `1` win, `2` loss, `3` breakeven, or `4` cancelled.
 
 ## Source checks
 

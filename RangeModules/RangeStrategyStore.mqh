@@ -3,6 +3,14 @@
 
 #include "RangeStrategyData.mqh"
 
+// CSV fields are written as separate values, so reject delimiters and line
+// breaks in caller-provided text rather than allowing a record to shift.
+bool StrategyCsvTextIsSafe(const string value)
+  {
+   return(StringFind(value,",")<0 && StringFind(value,"\r")<0 &&
+          StringFind(value,"\n")<0);
+  }
+
 //+------------------------------------------------------------------+
 class CStrategyStore
   {
@@ -21,7 +29,10 @@ public:
 bool CStrategyStore::Append(const STradeRecord &record)
   {
    if(m_file=="" || record.schema_version!=RC_TRADE_SCHEMA_VERSION ||
-      record.trade_id=="" || record.strategy_id=="")
+      record.trade_id=="" || record.strategy_id=="" ||
+      !StrategyCsvTextIsSafe(record.trade_id) ||
+      !StrategyCsvTextIsSafe(record.strategy_id) ||
+      !StrategyCsvTextIsSafe(record.symbol))
       return(false);
 
    const int fh=FileOpen(m_file,FILE_READ|FILE_WRITE|FILE_CSV|FILE_ANSI,',');
@@ -41,7 +52,7 @@ bool CStrategyStore::Append(const STradeRecord &record)
              DoubleToString(record.stop_price,8),
              DoubleToString(record.target_price,8),
              (long)record.exit_time,DoubleToString(record.exit_price,8),
-             record.outcome,DoubleToString(record.pnl,8));
+             record.outcome,DoubleToString(record.pnl,8),"END");
 
    FileClose(fh);
    return(written>0);
@@ -63,8 +74,12 @@ bool CStrategyStore::Load(STradeRecord &records[])
      {
       STradeRecord row;
       row.schema_version=(int)FileReadNumber(fh);
-      if(FileIsEnding(fh))
-         break;
+      if(row.schema_version!=RC_TRADE_SCHEMA_VERSION)
+        {
+         FileClose(fh);
+         ArrayResize(records,0);
+         return(false);
+        }
 
       row.trade_id   =FileReadString(fh);
       row.strategy_id=FileReadString(fh);
@@ -79,8 +94,12 @@ bool CStrategyStore::Load(STradeRecord &records[])
       row.exit_price =FileReadNumber(fh);
       row.outcome    =(int)FileReadNumber(fh);
       row.pnl        =FileReadNumber(fh);
+      const string row_end=FileReadString(fh);
 
-      if(row.schema_version!=RC_TRADE_SCHEMA_VERSION)
+      if(row_end!="END" || row.trade_id=="" || row.strategy_id=="" ||
+         !StrategyCsvTextIsSafe(row.trade_id) ||
+         !StrategyCsvTextIsSafe(row.strategy_id) ||
+         !StrategyCsvTextIsSafe(row.symbol))
         {
          FileClose(fh);
          ArrayResize(records,0);

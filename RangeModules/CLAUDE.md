@@ -55,7 +55,7 @@ Drawing files stay in `MQL5/Files/` as `RC_<symbol>_<range>.csv`. Preserve the e
 
 Future trade records use `STradeRecord` in `RangeStrategyData.mqh` and `CStrategyStore` in `RangeStrategyStore.mqh`. Initialize records with `StrategyRecordInit()`. CSV rows start with schema version `1` and are stored in `MQL5/Files/RC_trades.csv` by default. The store rejects unsupported schema versions. The indicator must not instantiate or call this store until a separate strategy is explicitly added. Do not couple it to a particular strategy or silently change its schema.
 
-Version 1 columns are `schema_version`, `trade_id`, `strategy_id`, `symbol`, `range_ticks`, `direction`, `entry_time`, `entry_price`, `stop_price`, `target_price`, `exit_time`, `exit_price`, `outcome`, and `pnl`. Append requires a nonempty trade ID and strategy ID. Direction values are `1` long and `-1` short; outcomes are `0` open, `1` win, `2` loss, `3` breakeven, and `4` cancelled.
+Version 1 columns are `schema_version`, `trade_id`, `strategy_id`, `symbol`, `range_ticks`, `direction`, `entry_time`, `entry_price`, `stop_price`, `target_price`, `exit_time`, `exit_price`, `outcome`, `pnl`, and a trailing `END` row marker. Loading rejects incomplete rows and unsupported schema versions while accepting a genuinely empty file. Append requires nonempty trade and strategy IDs and rejects commas or line breaks in all text fields. Direction values are `1` long and `-1` short; outcomes are `0` open, `1` win, `2` loss, `3` breakeven, and `4` cancelled.
 
 ## Platform constraints
 
