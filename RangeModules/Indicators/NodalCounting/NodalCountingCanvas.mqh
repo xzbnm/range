@@ -33,6 +33,7 @@ private:
    void           DrawPanel(CCanvas *cv,const color text_color);
    void           DrawNodes(CCanvas *cv,const SView &view,const int first,
                             const int last_real);
+   void           DrawWindowMarkers(CCanvas *cv,const SView &view);
    void           StepSetting(const int row,const int direction);
 
 public:
@@ -149,6 +150,38 @@ void CNodalCountingCanvas::DrawNodes(CCanvas *cv,const SView &view,
    cv.FontSet("Tahoma",-100);
   }
 
+void CNodalCountingCanvas::DrawWindowMarkers(CCanvas *cv,const SView &view)
+  {
+   if(!m_settings.draw || m_engine.BarCount()<=0) return;
+
+   const int start=m_engine.WindowStart();
+   const int end=m_engine.WindowEnd();
+   if(start<0 || end<start) return;
+
+   const int x_start=(int)MathRound(view.anchor_x-(view.last_slot-start)*view.step);
+   const int x_end=(int)MathRound(view.anchor_x-(view.last_slot-end)*view.step);
+   const bool start_visible=(x_start>=0 && x_start<view.plot_r);
+   const bool end_visible=(x_end>=0 && x_end<view.plot_r);
+   const int marker_y=view.plot_b-3;
+   const uint start_color=ColorToARGB(C'76,175,128',230);
+   const uint end_color=ColorToARGB(C'236,170,76',230);
+
+   cv.FontSet("Tahoma",-80);
+   if(start_visible)
+     {
+      cv.LineVertical(x_start,marker_y-6,marker_y,start_color);
+      cv.TextOut(x_start-3,marker_y-17,"S",start_color);
+     }
+   if(end_visible)
+     {
+      cv.LineVertical(x_end,marker_y-6,marker_y,end_color);
+      const int label_y=(start_visible && MathAbs(x_end-x_start)<12?
+                         marker_y-29:marker_y-17);
+      cv.TextOut(x_end-3,label_y,"E",end_color);
+     }
+   cv.FontSet("Tahoma",-100);
+  }
+
 void CNodalCountingCanvas::DrawPanel(CCanvas *cv,const color text_color)
   {
    const int x=m_panel_x, y=m_panel_y, w=m_panel_w;
@@ -213,6 +246,7 @@ void CNodalCountingCanvas::Render(CCanvas *cv,const SView &view,
    DrawButton(cv,m_button_x,m_button_y,82,25,m_settings.draw?"NDS  ON":"NDS  OFF",
               m_settings.draw,text_color);
    DrawButton(cv,m_button_x+87,m_button_y,30,25,"...",m_panel_open,text_color);
+   DrawWindowMarkers(cv,view);
    DrawNodes(cv,view,first,last_real);
   }
 
