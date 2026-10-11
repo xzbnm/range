@@ -409,14 +409,14 @@ void CNodalCountingEngine::Process(const int i,const int last_bar_index)
         {
          m_leg_direction=direction;
          m_leg_extreme_index=i;
-         m_leg_extreme=(direction>0?LowAt(i):HighAt(i));
-         m_leg_pre_index=(direction>0?m_index_highest:m_index_lowest);
+         m_leg_extreme=(direction>0?HighAt(i):LowAt(i));
+         m_leg_pre_index=(direction>0?m_index_lowest:m_index_highest);
         }
       else if(direction==m_leg_direction)
         {
-         const double extreme=(direction>0?LowAt(i):HighAt(i));
-         if((direction>0 && extreme<m_leg_extreme) ||
-            (direction<0 && extreme>m_leg_extreme))
+         const double extreme=(direction>0?HighAt(i):LowAt(i));
+         if((direction>0 && extreme>m_leg_extreme) ||
+            (direction<0 && extreme<m_leg_extreme))
            {
             m_leg_extreme=extreme;
             m_leg_extreme_index=i;
@@ -424,18 +424,22 @@ void CNodalCountingEngine::Process(const int i,const int last_bar_index)
         }
       else
         {
+         int pivot_index=m_leg_extreme_index;
+         if((m_leg_direction>0 && HighAt(i)>m_leg_extreme) ||
+            (m_leg_direction<0 && LowAt(i)<m_leg_extreme))
+            pivot_index=i;
          if(count_this_bar)
            {
             if(m_leg_direction>0)
-               FindDown(i,m_leg_extreme_index,m_leg_pre_index);
+               FindUp(i,pivot_index,m_leg_pre_index);
             else
-               FindUp(i,m_leg_extreme_index,m_leg_pre_index);
+               FindDown(i,pivot_index,m_leg_pre_index);
            }
 
-         const int prior_extreme=m_leg_extreme_index;
+         const int prior_extreme=pivot_index;
          m_leg_direction=direction;
          m_leg_extreme_index=i;
-         m_leg_extreme=(direction>0?LowAt(i):HighAt(i));
+         m_leg_extreme=(direction>0?HighAt(i):LowAt(i));
          m_leg_pre_index=prior_extreme;
         }
      }
@@ -502,8 +506,9 @@ void CNodalCountingEngine::Rebuild(CRangeAggregator *aggregator,
    m_bar_count=total;
    const int last=total-1;
    const int first=(int)MathMax(0,last-m_settings.start_point+1);
-   const int last_to_process=(int)MathMin(last,last-m_settings.end_point+1);
-   const int history_first=(int)MathMax(1,first-5000);
+   // Only completed candles can confirm a direction change.
+   const int last_to_process=(int)MathMin(completed-1,WindowEnd());
+   const int history_first=(int)MathMax(0,first-5000);
    for(int i=history_first;i<=last_to_process;i++) Process(i,last);
   }
 

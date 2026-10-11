@@ -109,8 +109,9 @@ void CNodalCountingCanvas::DrawNodes(CCanvas *cv,const SView &view,
       if(node.index_node<first ||
          node.index_node>last_real || !m_engine.GetBar(node.index_node,bar)) continue;
       const int x=(int)MathRound(view.anchor_x-(view.last_slot-node.index_node)*view.step);
-      const int y=view.plot_t+(int)((view.hi-bar.high)/view.span*view.plot_h)-label_height-4;
-      if(x<0 || x>=view.plot_r || y<view.plot_t+2 || y>=view.plot_b) continue;
+      const int anchor_y=view.plot_t+(int)((view.hi-bar.high)/view.span*view.plot_h);
+      if(x<0 || x>=view.plot_r || anchor_y<view.plot_t || anchor_y>view.plot_b) continue;
+      const int y=(int)MathMax(view.plot_t+2,anchor_y-label_height-4);
 
       string label=IntegerToString(node.number_node);
       if(i>0)
@@ -119,7 +120,8 @@ void CNodalCountingCanvas::DrawNodes(CCanvas *cv,const SView &view,
          if(m_engine.GetUp(i-1,prior) && prior.index_node==node.index_node)
             label="   "+label;
         }
-      cv.TextOut(x-(int)cv.TextWidth(label)/2,y,label,
+      const int label_x=(int)MathMax(0,MathMin(view.plot_r-cv.TextWidth(label),x-(int)cv.TextWidth(label)/2));
+      cv.TextOut(label_x,y,label,
                  ColorToARGB(m_settings.colors[color_index],255));
      }
 
@@ -134,8 +136,9 @@ void CNodalCountingCanvas::DrawNodes(CCanvas *cv,const SView &view,
       if(node.index_node<first ||
          node.index_node>last_real || !m_engine.GetBar(node.index_node,bar)) continue;
       const int x=(int)MathRound(view.anchor_x-(view.last_slot-node.index_node)*view.step);
-      const int y=view.plot_t+(int)((view.hi-bar.low)/view.span*view.plot_h)+4;
-      if(x<0 || x>=view.plot_r || y<view.plot_t || y>=view.plot_b-2) continue;
+      const int anchor_y=view.plot_t+(int)((view.hi-bar.low)/view.span*view.plot_h);
+      if(x<0 || x>=view.plot_r || anchor_y<view.plot_t || anchor_y>view.plot_b) continue;
+      const int y=(int)MathMin(view.plot_b-label_height-2,anchor_y+4);
 
       string label=IntegerToString(node.number_node);
       if(i>0)
@@ -144,7 +147,8 @@ void CNodalCountingCanvas::DrawNodes(CCanvas *cv,const SView &view,
          if(m_engine.GetDown(i-1,prior) && prior.index_node==node.index_node)
             label="   "+label;
         }
-      cv.TextOut(x-(int)cv.TextWidth(label)/2,y,label,
+      const int label_x=(int)MathMax(0,MathMin(view.plot_r-cv.TextWidth(label),x-(int)cv.TextWidth(label)/2));
+      cv.TextOut(label_x,y,label,
                  ColorToARGB(m_settings.colors[color_index],255));
      }
    cv.FontSet("Tahoma",-100);
