@@ -48,6 +48,8 @@ cases = r'''
 int main() {
   SNodalSettings settings; NodalSettingsInit(settings);
   CNodalCountingEngine engine;
+  SNodalNode preview;
+  bool preview_up=false;
   CRangeAggregator falling;
   falling.bars={{120,121,110,111},{110,111,100,101},{100,101,90,91}};
   engine.Rebuild(&falling,settings);
@@ -55,12 +57,24 @@ int main() {
   falling.forming=true; falling.current={90,100,89,99};
   engine.Rebuild(&falling,settings);
   assert(engine.DownCount()==0); // unclosed green candle cannot confirm
+  assert(engine.GetProvisional(preview,preview_up));
+  assert(!preview_up && preview.index_node==3 && preview.high_node==89);
+  assert(engine.DownCount()==0 && engine.UpCount()==0);
+  falling.current={90,100,88,89}; // green turns red: cancel the preview
+  engine.Rebuild(&falling,settings);
+  assert(!engine.GetProvisional(preview,preview_up));
+  falling.current={90,100,87,99};
+  engine.Rebuild(&falling,settings);
+  assert(engine.GetProvisional(preview,preview_up));
+  assert(preview.high_node==87);
+  falling.current={90,100,89,99};
   falling.bars.push_back(falling.current);
   falling.current={100,100,100,100};
   engine.Rebuild(&falling,settings);
   SNodalNode node;
   assert(engine.GetDown(engine.DownCount()-1,node));
   assert(node.number_node==1 && node.index_node==3 && node.high_node==89);
+  assert(!engine.GetProvisional(preview,preview_up));
   falling.bars.push_back({100,110,99,109});
   engine.Rebuild(&falling,settings);
   assert(engine.GetDown(engine.DownCount()-1,node));
@@ -74,11 +88,19 @@ int main() {
   rising.forming=true; rising.current={120,121,110,111};
   engine.Rebuild(&rising,settings);
   assert(engine.UpCount()==0);
+  assert(engine.GetProvisional(preview,preview_up));
+  assert(preview_up && preview.index_node==3 && preview.high_node==121);
+  settings.end_point=2; // counting window excludes the live candle
+  engine.Rebuild(&rising,settings);
+  assert(!engine.GetProvisional(preview,preview_up));
+  settings.end_point=0;
+  engine.Rebuild(&rising,settings);
   rising.bars.push_back(rising.current);
   rising.current={110,110,110,110};
   engine.Rebuild(&rising,settings);
   assert(engine.GetUp(engine.UpCount()-1,node));
   assert(node.number_node==1 && node.index_node==3 && node.high_node==121);
+  assert(!engine.GetProvisional(preview,preview_up));
   rising.bars.push_back({110,111,100,101});
   engine.Rebuild(&rising,settings);
   assert(engine.GetUp(engine.UpCount()-1,node));

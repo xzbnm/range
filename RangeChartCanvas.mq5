@@ -418,7 +418,7 @@ void Render(void)
       empty_view.plot_h=plot_h;
       empty_view.anchor_x=AnchorX();
       empty_view.last_slot=0;
-      g_nds.Render(GetPointer(g_cv),empty_view,0,-1,InpText);
+      g_nds.Render(GetPointer(g_cv),empty_view,0,-1,InpText,InpBg);
       g_nds.RenderPanel(GetPointer(g_cv),InpText);
       g_cv.Update();
       return;
@@ -482,7 +482,7 @@ void Render(void)
    g_renderer.DrawCurrentClose(GetPointer(g_cv),g_view,g_w,
                                has_cur && g_scroll<=0,cur,InpBull,InpBear,
                                InpText,_Digits);
-   g_nds.Render(GetPointer(g_cv),g_view,first,last_real,InpText);
+   g_nds.Render(GetPointer(g_cv),g_view,first,last_real,InpText,InpBg);
 
    g_draw.RenderAll(g_view,g_sel,_Digits);
 

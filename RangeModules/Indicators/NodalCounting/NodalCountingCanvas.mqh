@@ -34,13 +34,16 @@ private:
    void           DrawNodes(CCanvas *cv,const SView &view,const int first,
                             const int last_real);
    void           DrawWindowMarkers(CCanvas *cv,const SView &view);
+   void           DrawProvisional(CCanvas *cv,const SView &view,const int first,
+                                  const int last_real,const color background);
    void           StepSetting(const int row,const int direction);
 
 public:
                      CNodalCountingCanvas(void);
    void              Rebuild(CRangeAggregator *aggregator);
    void              Render(CCanvas *cv,const SView &view,const int first,
-                            const int last_real,const color text_color);
+                            const int last_real,const color text_color,
+                            const color background);
    void              RenderPanel(CCanvas *cv,const color text_color);
    bool              HandleClick(const int x,const int y);
    bool              HandleKey(const int key,bool &settings_changed);
@@ -154,6 +157,46 @@ void CNodalCountingCanvas::DrawNodes(CCanvas *cv,const SView &view,
    cv.FontSet("Tahoma",-100);
   }
 
+void CNodalCountingCanvas::DrawProvisional(CCanvas *cv,const SView &view,
+                                           const int first,const int last_real,
+                                           const color background)
+  {
+   SNodalNode node;
+   bool is_up=false;
+   if(!m_settings.draw || !m_engine.GetProvisional(node,is_up)) return;
+   if(node.index_node<first || node.index_node>last_real) return;
+   const int x=(int)MathRound(view.anchor_x-(view.last_slot-node.index_node)*view.step);
+   const int anchor_y=view.plot_t+(int)((view.hi-node.high_node)/view.span*view.plot_h);
+   if(x<0 || x>=view.plot_r || anchor_y<view.plot_t || anchor_y>view.plot_b) return;
+
+   int color_index=0;
+   const int count=(is_up?m_engine.UpCount():m_engine.DownCount());
+   for(int i=0;i<count;i++)
+     {
+      SNodalNode prior;
+      if(is_up) m_engine.GetUp(i,prior); else m_engine.GetDown(i,prior);
+      if(i>0 && prior.number_node==1)
+        { color_index++; if(color_index==8) color_index=1; }
+     }
+   if(count>0) { color_index++; if(color_index==8) color_index=1; }
+   // Blend explicitly: the chart canvas uses XRGB and ignores alpha.
+   const uint fg=ColorToARGB(m_settings.colors[color_index],255);
+   const uint bg=ColorToARGB(background,255);
+   const uint r=(((fg>>16)&255)*45+((bg>>16)&255)*55)/100;
+   const uint g=(((fg>>8)&255)*45+((bg>>8)&255)*55)/100;
+   const uint b=((fg&255)*45+(bg&255)*55)/100;
+   const uint tint=0xFF000000|(r<<16)|(g<<8)|b;
+   const int font_size=m_text_sizes[m_settings.text_size];
+   const int label_height=(int)MathMax(7,font_size/10);
+   cv.FontSet("Tahoma",-font_size);
+   const string label="1?";
+   const int label_x=(int)MathMax(0,MathMin(view.plot_r-cv.TextWidth(label),x-(int)cv.TextWidth(label)/2));
+   const int y=(is_up?(int)MathMax(view.plot_t+2,anchor_y-label_height-4):
+                      (int)MathMin(view.plot_b-label_height-2,anchor_y+4));
+   cv.TextOut(label_x,y,label,tint);
+   cv.FontSet("Tahoma",-100);
+  }
+
 void CNodalCountingCanvas::DrawWindowMarkers(CCanvas *cv,const SView &view)
   {
    if(!m_settings.draw || m_engine.BarCount()<=0) return;
@@ -241,7 +284,7 @@ void CNodalCountingCanvas::Rebuild(CRangeAggregator *aggregator)
 
 void CNodalCountingCanvas::Render(CCanvas *cv,const SView &view,
                                   const int first,const int last_real,
-                                  const color text_color)
+                                  const color text_color,const color background)
   {
    const bool narrow=(view.plot_r<=380);
    m_button_x=(narrow?8:260);
@@ -252,6 +295,7 @@ void CNodalCountingCanvas::Render(CCanvas *cv,const SView &view,
    DrawButton(cv,m_button_x+87,m_button_y,30,25,"...",m_panel_open,text_color);
    DrawWindowMarkers(cv,view);
    DrawNodes(cv,view,first,last_real);
+   if(view.span>0.0) DrawProvisional(cv,view,first,last_real,background);
   }
 
 void CNodalCountingCanvas::RenderPanel(CCanvas *cv,const color text_color)

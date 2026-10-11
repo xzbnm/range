@@ -43,6 +43,7 @@ public:
    int               DownCount(void) const { return(ArraySize(m_nodes_down)); }
    bool              GetUp(const int index,SNodalNode &node) const;
    bool              GetDown(const int index,SNodalNode &node) const;
+   bool              GetProvisional(SNodalNode &node,bool &is_up) const;
    bool              GetBar(const int index,SRangeBar &bar) const;
    int               BarCount(void) const { return(m_bar_count); }
    int               WindowStart(void) const;
@@ -97,6 +98,33 @@ bool CNodalCountingEngine::GetBar(const int index,SRangeBar &bar) const
    const int completed=m_aggregator.Total();
    if(index>=completed) return(m_aggregator.Current(bar));
    if(!m_aggregator.Get(index,bar)) return(false);
+   return(true);
+  }
+
+bool CNodalCountingEngine::GetProvisional(SNodalNode &node,bool &is_up) const
+  {
+   is_up=false;
+   if(m_aggregator==NULL || m_leg_direction==0) return(false);
+   SRangeBar current;
+   if(!m_aggregator.Current(current)) return(false);
+   const int index=m_aggregator.Total();
+   if(index<WindowStart() || index>WindowEnd()) return(false);
+   const int direction=(current.close>current.open?1:(current.close<current.open?-1:0));
+   if(direction==0 || direction==m_leg_direction) return(false);
+
+   is_up=(m_leg_direction>0);
+   int pivot=m_leg_extreme_index;
+   if((is_up && current.high>m_leg_extreme) ||
+      (!is_up && current.low<m_leg_extreme)) pivot=index;
+   node.number_node=1;
+   node.index_node=pivot;
+   node.index_pre_node=m_leg_pre_index;
+   node.index_correction=index;
+   node.low_pre_node=(is_up?LowAt(m_leg_pre_index):HighAt(m_leg_pre_index));
+   node.high_node=(is_up?HighAt(pivot):LowAt(pivot));
+   node.low_correction=(is_up?current.low:current.high);
+   node.amount_correction=(is_up?node.high_node-node.low_correction:
+                                node.low_correction-node.high_node);
    return(true);
   }
 
