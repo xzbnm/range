@@ -154,7 +154,8 @@ void CNodalCountingEngine::SortDown(void)
       SNodalNode node=m_nodes_down[i];
       if(size<=1)
         {
-         if(node.low_correction>=node.low_pre_node) ArrayRemove(m_nodes_down,0,1);
+         // Keep the first reversal-confirmed node visible. Later nodes are
+         // reduced against it by the normal sequence rules below.
          break;
         }
       if(i<=0) break;
@@ -253,7 +254,8 @@ void CNodalCountingEngine::SortUp(void)
       SNodalNode node=m_nodes_up[i];
       if(size<=1)
         {
-         if(node.low_correction<=node.low_pre_node) ArrayRemove(m_nodes_up,0,1);
+         // Keep the first reversal-confirmed node visible. Later nodes are
+         // reduced against it by the normal sequence rules below.
          break;
         }
       if(i<=0) break;
