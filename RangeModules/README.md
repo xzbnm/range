@@ -32,7 +32,7 @@ The indicator seeds from the start of the current week using `CopyTicksRange`. I
 
 ## Chart and controls
 
-Bars (OHLC) is the default style; the panel switches between Bars and Candles. The mouse wheel zooms, dragging pans, and the chart supports crosshair price/time tags and a live forming-bar outline.
+Bars (OHLC) is the default style; the panel switches between Bars and Candles. The mouse wheel zooms, dragging pans, and the chart supports crosshair price/time tags. The live forming bar uses the same styling as completed bars without an extra outline.
 
 | Control | Action |
 |---|---|

@@ -189,7 +189,7 @@ void CNodalCountingCanvas::DrawProvisional(CCanvas *cv,const SView &view,
    const int font_size=m_text_sizes[m_settings.text_size];
    const int label_height=(int)MathMax(7,font_size/10);
    cv.FontSet("Tahoma",-font_size);
-   const string label="1?";
+   const string label="1";
    const int label_x=(int)MathMax(0,MathMin(view.plot_r-cv.TextWidth(label),x-(int)cv.TextWidth(label)/2));
    const int y=(is_up?(int)MathMax(view.plot_t+2,anchor_y-label_height-4):
                       (int)MathMin(view.plot_b-label_height-2,anchor_y+4));

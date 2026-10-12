@@ -148,9 +148,6 @@ void CRangeChartRenderer::DrawBars(CCanvas *cv,CRangeAggregator *agg,
          StrokeV(cv,cx,high_y,low_y,line_width,clr);
          StrokeH(cv,cx-tick_width,cx,open_y,line_width,clr);
          StrokeH(cv,cx,cx+tick_width+1,close_y,line_width,clr);
-         if(forming)
-            cv.Rectangle(cx-tick_width-2,high_y-2,cx+tick_width+3,low_y+2,
-                         ColorToARGB(clrWhite,255));
         }
       else
         {
@@ -158,9 +155,6 @@ void CRangeChartRenderer::DrawBars(CCanvas *cv,CRangeAggregator *agg,
          int y1=MathMin(open_y,close_y),y2=MathMax(open_y,close_y);
          if(y2-y1<1) y2=y1+1;
          if(body_half>0) cv.FillRectangle(cx-body_half,y1,cx+body_half,y2,clr);
-         if(forming)
-            cv.Rectangle(cx-body_half-1,y1-1,cx+body_half+1,y2+1,
-                         ColorToARGB(clrWhite,255));
         }
      }
   }
