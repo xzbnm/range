@@ -182,8 +182,7 @@ void CNodalCountingEngine::SortDown(void)
       SNodalNode node=m_nodes_down[i];
       if(size<=1)
         {
-         // Keep the first reversal-confirmed node visible. Later nodes are
-         // reduced against it by the normal sequence rules below.
+         if(node.low_correction>=node.low_pre_node) ArrayRemove(m_nodes_down,0,1);
          break;
         }
       if(i<=0) break;
@@ -282,8 +281,7 @@ void CNodalCountingEngine::SortUp(void)
       SNodalNode node=m_nodes_up[i];
       if(size<=1)
         {
-         // Keep the first reversal-confirmed node visible. Later nodes are
-         // reduced against it by the normal sequence rules below.
+         if(node.low_correction<=node.low_pre_node) ArrayRemove(m_nodes_up,0,1);
          break;
         }
       if(i<=0) break;
@@ -427,6 +425,7 @@ void CNodalCountingEngine::Process(const int i,const int last_bar_index)
    SRangeBar bar;
    if(!GetBar(i,bar)) return;
    const int direction=(bar.close>bar.open?1:(bar.close<bar.open?-1:0));
+   bool created_up=false,created_down=false;
    if(direction!=0)
      {
       const int window_first=(int)MathMax(0,last_bar_index-m_settings.start_point+1);
@@ -459,9 +458,9 @@ void CNodalCountingEngine::Process(const int i,const int last_bar_index)
          if(count_this_bar)
            {
             if(m_leg_direction>0)
-               FindUp(i,pivot_index,m_leg_pre_index);
+              { FindUp(i,pivot_index,m_leg_pre_index); created_up=true; }
             else
-               FindDown(i,pivot_index,m_leg_pre_index);
+              { FindDown(i,pivot_index,m_leg_pre_index); created_down=true; }
            }
 
          const int prior_extreme=pivot_index;
@@ -472,7 +471,9 @@ void CNodalCountingEngine::Process(const int i,const int last_bar_index)
         }
      }
 
-   if(direction>0)
+   // As in Pine, correction extremes are independent of candle body color.
+   // A newly added node has already been sorted by FindUp/FindDown.
+   if(!created_down)
      {
       const int count=ArraySize(m_nodes_down);
       if(count>0)
@@ -488,7 +489,7 @@ void CNodalCountingEngine::Process(const int i,const int last_bar_index)
            }
         }
      }
-   else if(direction<0)
+   if(!created_up)
      {
       const int count=ArraySize(m_nodes_up);
       if(count>0)

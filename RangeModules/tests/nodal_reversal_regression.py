@@ -118,6 +118,38 @@ int main() {
   assert(engine.GetDown(engine.DownCount()-1,node));
   assert(node.index_node==1 && node.high_node==100);
   std::cout << "PASS: both reversals retain the prior extreme when appropriate\n";
+  // Pine invalidation is inclusive and depends on high/low, not candle color.
+  for(int side=0;side<2;side++) {
+    for(int body=-1;body<=1;body++) {
+      for(int beyond=0;beyond<=1;beyond++) {
+        CRangeAggregator broken;
+        broken.bars={{90,100,89,99},{100,110,99,109},{110,120,109,119},
+                     {120,121,110,111}};
+        SRangeBar breach={100,112,89.0-beyond,100.0+body};
+        if(side==1) {
+          for(auto& b:broken.bars)
+            b={210-b.open,210-b.low,210-b.high,210-b.close};
+          breach={210-breach.open,210-breach.low,210-breach.high,210-breach.close};
+        }
+        engine.Rebuild(&broken,settings);
+        assert((side==0?engine.UpCount():engine.DownCount())==1);
+        broken.bars.push_back(breach);
+        engine.Rebuild(&broken,settings);
+        assert((side==0?engine.UpCount():engine.DownCount())==0);
+      }
+    }
+  }
+  std::cout << "PASS: base touch/break removes nodes for bullish, bearish and neutral candles\n";
+  CRangeAggregator merged;
+  merged.bars={{90,100,89,99},{100,120,99,119},{119,119,110,111},
+               {111,118,111,117},{117,117,100,101}};
+  engine.Rebuild(&merged,settings);
+  assert(engine.UpCount()==1 && engine.GetUp(0,node));
+  assert(node.high_node==120 && node.low_pre_node==89);
+  merged.bars.push_back({100,101,89,90});
+  engine.Rebuild(&merged,settings);
+  assert(engine.UpCount()==0);
+  std::cout << "PASS: merged node keeps its original invalidation base\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix='nodal-regression-') as folder:
